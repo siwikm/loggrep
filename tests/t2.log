@@ -1,0 +1,91 @@
+2023-02-08 16:50:53,498 INFO	flow_runner.py	run:	Beginning Flow run for 'dev_big-query-stocks-2-etl-into-products'
+2023-02-08 16:50:53,506 INFO	task_runner.py	run:	Task 'project_id': Starting task run...
+2023-02-08 16:50:53,536 INFO	task_runner.py	run:	Task 'project_id': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,541 INFO	task_runner.py	run:	Task 'how_far_go_for_bq_data': Starting task run...
+2023-02-08 16:50:53,545 INFO	task_runner.py	run:	Task 'how_far_go_for_bq_data': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,551 INFO	task_runner.py	run:	Task 'size_of_single_extract': Starting task run...
+2023-02-08 16:50:53,554 INFO	task_runner.py	run:	Task 'size_of_single_extract': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,559 INFO	task_runner.py	run:	Task 'get_key_name_for_project_id': Starting task run...
+2023-02-08 16:50:53,666 INFO	gcp_key.py	get_gcp_key_name:	Downloaded key: ita-klient-pelion-d7925df8c5ba.json for project_id: 2
+2023-02-08 16:50:53,668 INFO	gcp_stocks_v2.py	get_key_name_for_project_id:	Downloaded ita-klient-pelion-d7925df8c5ba.json for 2
+2023-02-08 16:50:53,672 INFO	task_runner.py	run:	Task 'get_key_name_for_project_id': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,678 INFO	task_runner.py	run:	Task 'get_last_modify_time_from_local_data': Starting task run...
+2023-02-08 16:50:53,680 INFO	gcp_stocks_v2.py	get_last_modify_time_from_local_data:	Downloaded 2023-02-08 14:00:00 for command '2023-02-08T14:00:00Z'
+2023-02-08 16:50:53,683 INFO	task_runner.py	run:	Task 'get_last_modify_time_from_local_data': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,688 INFO	task_runner.py	run:	Task 'load_local_gcp_auth_key': Starting task run...
+2023-02-08 16:50:53,699 INFO	gcp_key.py	read_gcp_keys_as_jsons:	read successfully 3 keys.
+ ['ita-klient-pelion-0ecbaa1371ea.json', 'ita-klient-pelion-d7925df8c5ba.json', 'ita-klient-pelion-fb4efda7b7da.json']
+2023-02-08 16:50:53,700 INFO	gcp_stocks_v2.py	load_local_gcp_auth_key:	Downloaded dict_keys(['ita-klient-pelion-0ecbaa1371ea.json', 'ita-klient-pelion-d7925df8c5ba.json', 'ita-klient-pelion-fb4efda7b7da.json']) and picked ita-klient-pelion-d7925df8c5ba.json based on project id
+2023-02-08 16:50:53,704 INFO	task_runner.py	run:	Task 'load_local_gcp_auth_key': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:53,709 INFO	task_runner.py	run:	Task 'get_pages': Starting task run...
+2023-02-08 16:50:54,587 INFO	gcp_stocks_v2.py	get_pages:	Downloaded 4 as num of pages
+2023-02-08 16:50:54,611 INFO	task_runner.py	run:	Task 'get_pages': Finished task run for task with final state: 'Success'
+2023-02-08 16:50:54,623 INFO	task_runner.py	run:	Task 'full_etl_for_small_portion': Starting task run...
+2023-02-08 16:50:54,629 INFO	task_runner.py	run:	Task 'full_etl_for_small_portion': Finished task run for task with final state: 'Mapped'
+2023-02-08 16:50:54,638 INFO	task_runner.py	run:	Task 'full_etl_for_small_portion[0]': Starting task run...
+2023-02-08 16:50:54,642 INFO	gcp_key.py	get_stock_data_v2:	Current query. 
+            SELECT 
+                ID_PODMIOT as id_podmiot,
+                ID_KARTY_ZAKUPOWEJ as id_karty_zakupowej, 
+                ID_KARTY_TOWAROWEJ as id_karty_towarowej,
+                EAN as ean, 
+                BLOZ as bloz,
+                BAZYL as bazyl, 
+                NAZWA as nazwa, 
+                MNOZNIK as mnoznik, 
+                STOCK as stock, 
+                CAST(SUGEROWANA_CENA_SPRZ * 100 as INT64) as sugerowana_cena_sprzedazy,
+                DATA_ZAKUPU as data_zakupu,
+                DATA_AKTUALIZACJI_APTEKA as data_aktualizacji_apteka,
+                DATA_AKTUALIZACJI_FP as data_aktualizacji_fp 
+            FROM `ita-klient-pelion`.main.stock_2
+            where
+                ean is not null
+                and ID_PODMIOT is not null
+                and ID_KARTY_TOWAROWEJ is not null
+                and trim(ean) <> ''
+                and trim(ean) <> '-'
+                and (
+                        (trim(bloz) <> '' and trim(bloz) <> '-' and trim(bloz) <> '0000000') or (trim(bazyl) <> '' and trim(bazyl)  <> '-')
+                    )
+                and DATA_AKTUALIZACJI_FP >= TIMESTAMP("2023-02-08T14:00:00")
+                AND 
+            order by DATA_AKTUALIZACJI_FP asc
+            limit 10000 offset 0
+        
+2023-02-08 16:50:55,176 ERROR	task_runner.py	get_task_run_state:	Task 'full_etl_for_small_portion[0]': Exception encountered during task execution!
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/prefect/engine/task_runner.py", line 880, in get_task_run_state
+    value = prefect.utilities.executors.run_task_with_timeout(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/prefect/utilities/executors.py", line 480, in run_task_with_timeout
+    return run_with_thread_timeout(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/prefect/utilities/executors.py", line 255, in run_with_thread_timeout
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/etl/gcp_stocks_v2.py", line 112, in full_etl_for_small_portion
+    stock_data = get_stock_data_v2(
+                 ^^^^^^^^^^^^^^^^^^
+  File "/etl/pgf_gcp/extracts/gcp_key.py", line 346, in get_stock_data_v2
+    _records = [dict(**elem) for elem in data]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1783, in __iter__
+    return iter(self.result())
+                ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1499, in result
+    do_get_result()
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry.py", line 283, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry.py", line 190, in retry_target
+    return target()
+           ^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1489, in do_get_result
+    super(QueryJob, self).result(retry=retry, timeout=timeout)
+  File "/usr/local/lib/python3.11/site-packages/google/cloud/bigquery/job/base.py", line 728, in result
+    return super(_AsyncJob, self).result(timeout=timeout, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/google/api_core/future/polling.py", line 137, in result
+    raise self._exception
+google.api_core.exceptions.BadRequest: 400 Syntax error: Unexpected keyword ORDER at [28:13]

@@ -1,0 +1,39 @@
+
+[
+  {
+    "_id": "6899c61aaa1d1073b238f53d",
+    "index": 0,
+    "guid": "6d9be6f8-5316-4904-9345-81b700685981",
+    "isActive": false,
+    "balance": "$2,203.85",
+    "address": "862 Gotham Avenue, Martell, New Mexico, 8736",
+    "about": "Cillum cupidatat aute ullamco labore eiusmod ad commodo magna eu eu mollit. Consequat reprehenderit do est elit irure amet reprehenderit ullamco irure veniam sit irure. Commodo aliquip fugiat sunt dolor veniam non qui ipsum. Elit consectetur cillum est cupidatat velit commodo quis.\r\n",
+    "registered": "2022-08-22T04:40:13 -02:00",
+    "greeting": "Hello, undefined! You have 5 unread messages.",
+    "favoriteFruit": "strawberry",
+    "cardStatus": "none is not an allowed value (type=string_type, value=none)",
+    "cardNumber": "1234567890123456",
+    "cardType": "Visa",
+    "cardHolder": "John Doe",
+    "expiryDate": "12/25",
+    "cvv": "123",
+  },
+  {
+    "_id": "6899c61aaa1d1073b238f53e",
+    "index": 1,
+    "guid": "7a9be6f8-5316-4904-9345-81b700685982",
+    "isActive": true,
+    "balance": "$3,456.78",
+    "address": "123 Elm Street, Springfield, Illinois, 62704",
+    "about": "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\r\n",
+    "registered": "2023-01-15T10:20:30 -02:00",
+    "greeting": "Hello, Jane! You have 2 unread messages.",
+    "favoriteFruit": "banana",
+    "cardStatus": "active",
+    "cardNumber": "9876543210987654",
+    "cardType": "MasterCard",
+    "cardHolder": "Jane Smith",
+    "expiryDate": "11/24",
+    "cvv": "456"
+  }
+]

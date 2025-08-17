@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loggrep"
+version = "0.1.0"
+description = "Simple CLI tool to search log files"
+authors = [ { name = "Author" } ]
+requires-python = ">=3.8"
+
+[project.scripts]
+loggrep = "loggrep:main"

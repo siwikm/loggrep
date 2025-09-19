@@ -5,6 +5,9 @@ import sys
 import argparse
 from pathlib import Path
 from typing import List, Optional, TextIO
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def search_phrases_in_file(
@@ -35,7 +38,7 @@ def search_phrases_in_file(
     matches = 0
 
     if verbose:
-        print(f"Searching file: {file_path}")
+        logger.info(f"Searching file: {file_path}")
 
     # Prepare phrases once (avoid doing this per-line)
     if case_sensitive:
@@ -48,7 +51,7 @@ def search_phrases_in_file(
         # errors='replace' prevents crashes on bad encoding while keeping streaming
         with open(file_path, "r", encoding="utf-8", errors="replace") as file:
             if verbose:
-                print("  File loading completed successfully")
+                logger.info("  File loading completed successfully")
 
             for line_num, line in enumerate(file, 1):
                 # Keep original line content but strip only newline characters
@@ -77,7 +80,7 @@ def search_phrases_in_file(
                                 output_file.write(file_path + "\n")
                             except Exception:
                                 if verbose:
-                                    print(
+                                    logger.error(
                                         f"  ERROR: Failed to write filename to output while processing {file_path}"
                                     )
                         return matches
@@ -100,22 +103,18 @@ def search_phrases_in_file(
                         except Exception:
                             # avoid breaking the scan if writing fails
                             if verbose:
-                                print(
+                                logger.error(
                                     f"  ERROR: Failed to write to output file while processing {file_path}"
                                 )
 
     except FileNotFoundError:
-        if verbose:
-            print(f"  ERROR: File {file_path} not found")
-        print(f"Error: File {file_path} not found.")
+        logger.error(f"Error: File {file_path} not found.")
     except Exception as e:
-        if verbose:
-            print(f"  ERROR: Unexpected error reading file {file_path}: {e}")
-        print(f"Error reading file {file_path}: {e}")
+        logger.error(f"  ERROR: Unexpected error reading file {file_path}: {e}")
 
     # If count_only was requested and printing of per-file count is desired, caller will handle.
     if verbose:
-        print(f"  Search completed, found {matches} matches")
+        logger.info(f"  Search completed, found {matches} matches")
 
     return matches
 
@@ -135,21 +134,21 @@ def get_files_to_search(
         List of file paths
     """
     if verbose:
-        print(f"Checking path: {path}")
+        logger.info(f"Checking path: {path}")
 
     path_obj = Path(path)
     files_to_search = []
 
     if path_obj.is_file():
         if verbose:
-            print(f"  This is a file: {path}")
+            logger.info(f"  This is a file: {path}")
         return [str(path_obj)]
 
     elif path_obj.is_dir():
         if verbose:
-            print(f"  This is a directory: {path}")
+            logger.info(f"  This is a directory: {path}")
             if recursive:
-                print("  Using recursive mode")
+                logger.info("  Using recursive mode")
 
         if recursive:
             # Recursively search all files
@@ -162,13 +161,13 @@ def get_files_to_search(
                 if file_path.is_file():
                     files_to_search.append(str(file_path))
     else:
-        if verbose:
-            print(f"  ERROR: Path {path} does not exist or is not a file or directory")
-        print(f"Error: Path {path} does not exist or is not a file or directory.")
+        logger.error(
+            f"Error: Path {path} does not exist or is not a file or directory."
+        )
         return []
 
     if verbose:
-        print(f"  Found {len(files_to_search)} files")
+        logger.info(f"  Found {len(files_to_search)} files")
 
     return sorted(files_to_search)
 
@@ -256,11 +255,24 @@ def main():
     files_to_search = get_files_to_search(args.path, args.recursive, args.verbose)
 
     if not files_to_search:
-        print("No files found to search.")
+        logger.info("No files found to search.")
         return
 
     if args.verbose:
-        print(f"Starting search of {len(files_to_search)} files...")
+        if args.verbose:
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(levelname)s: %(message)s",
+                handlers=[logging.StreamHandler(sys.stdout)],
+            )
+        else:
+            # For non-verbose: only show warnings/errors, and matching lines as plain text
+            logging.basicConfig(
+                level=logging.WARNING,
+                format="%(message)s",  # no level prefix for matching lines
+                handlers=[logging.StreamHandler(sys.stdout)],
+            )
+        logger.info(f"Starting search of {len(files_to_search)} files...")
         if args.recursive:
             print("Mode: recursive")
         print(f"Search phrases: {args.phrases}")
@@ -284,7 +296,7 @@ def main():
     try:
         if args.output:
             if args.verbose:
-                print(f"Opening output file: {args.output}")
+                logger.info(f"Opening output file: {args.output}")
             output_handle = open(args.output, "w", encoding="utf-8")
 
         # Search each file (streaming; results printed/written immediately)
@@ -342,9 +354,7 @@ def main():
                 print(f"Saved {total_matches} lines to file")
 
     except Exception as e:
-        if args.verbose:
-            print(f"ERROR during search: {e}")
-        print(f"Error: {e}")
+        logger.error(f"ERROR during search: {e}")
 
     finally:
         if output_handle:

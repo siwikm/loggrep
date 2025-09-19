@@ -15,12 +15,20 @@ def search_phrases_in_file(
     verbose: bool = False,
     output_file: Optional[TextIO] = None,
     print_results: bool = True,
+    show_line_numbers: bool = True,
+    files_only: bool = False,
+    count_only: bool = False,
 ) -> int:
     """
     Searches for lines containing specified phrases in a file.
 
     This streaming version does NOT accumulate results in memory.
     It prints matches immediately and optionally writes them to `output_file`.
+
+    Options:
+      show_line_numbers -- include line numbers in printed matches
+      files_only -- print only file name when first match found (like grep -l)
+      count_only -- do not print matching lines, only counts per file
 
     Returns: number of matching lines found
     """
@@ -58,7 +66,32 @@ def search_phrases_in_file(
                     ok = any(phrase in search_line for phrase in search_phrases)
 
                 if ok:
-                    out = f"{file_path}:{line_num}: {line_content}"
+                    matches += 1
+
+                    # files_only: print filename once and stop scanning this file
+                    if files_only:
+                        if print_results:
+                            print(file_path)
+                        if output_file:
+                            try:
+                                output_file.write(file_path + "\n")
+                            except Exception:
+                                if verbose:
+                                    print(
+                                        f"  ERROR: Failed to write filename to output while processing {file_path}"
+                                    )
+                        return matches
+
+                    # count_only: do not print matching lines, continue to count
+                    if count_only:
+                        continue
+
+                    # normal: print/write matching line, respect show_line_numbers
+                    if show_line_numbers:
+                        out = f"{file_path}:{line_num}: {line_content}"
+                    else:
+                        out = f"{file_path}: {line_content}"
+
                     if print_results:
                         print(out)
                     if output_file:
@@ -70,7 +103,6 @@ def search_phrases_in_file(
                                 print(
                                     f"  ERROR: Failed to write to output file while processing {file_path}"
                                 )
-                    matches += 1
 
     except FileNotFoundError:
         if verbose:
@@ -81,6 +113,7 @@ def search_phrases_in_file(
             print(f"  ERROR: Unexpected error reading file {file_path}: {e}")
         print(f"Error reading file {file_path}: {e}")
 
+    # If count_only was requested and printing of per-file count is desired, caller will handle.
     if verbose:
         print(f"  Search completed, found {matches} matches")
 
@@ -199,6 +232,23 @@ def main():
         help="Display detailed operation logs",
     )
     parser.add_argument("-o", "--output", help="Save results to file")
+    parser.add_argument(
+        "--no-line-numbers",
+        action="store_true",
+        help="Do not include line numbers in output",
+    )
+    parser.add_argument(
+        "-c",
+        "--count",
+        action="store_true",
+        help="Only print number of matches per file (do not print matching lines)",
+    )
+    parser.add_argument(
+        "-l",
+        "--files-only",
+        action="store_true",
+        help="Only print names of files that contain matches (like grep -l)",
+    )
 
     args = parser.parse_args()
 
@@ -217,6 +267,9 @@ def main():
         print(f"Match mode: {'all phrases' if not args.any else 'any phrase'}")
         print(
             f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
+        )
+        print(
+            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}"
         )
         print("-" * 60)
     else:
@@ -243,9 +296,28 @@ def main():
                 match_all=not args.any,
                 verbose=args.verbose,
                 output_file=output_handle,
-                print_results=True,
+                print_results=not args.count and not args.files_only,
+                show_line_numbers=not args.no_line_numbers,
+                files_only=args.files_only,
+                count_only=args.count,
             )
             total_matches += matches
+
+            # If count mode, print per-file counts
+            if args.count and not args.files_only:
+                # print and optionally write per-file count
+                if args.verbose:
+                    print(f"{file_path}: {matches} matches")
+                else:
+                    print(f"{file_path}: {matches}")
+                if output_handle:
+                    try:
+                        output_handle.write(f"{file_path}: {matches}\n")
+                    except Exception:
+                        if args.verbose:
+                            print(
+                                f"  ERROR: Failed to write count for {file_path} to output file"
+                            )
 
         # Summary
         if total_matches:

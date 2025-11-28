@@ -7,7 +7,7 @@ No external dependencies — requires Python 3.8+.
 
 - Python 3.8 or newer
 
-## Installation (global)F
+## Installation (global)
 
 On macOS, Debian, Ubuntu — copy the script to a system binary directory and make it executable:
 

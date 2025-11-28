@@ -130,7 +130,7 @@ def search_phrases_in_file(
                     # Only search when we have a full window
                     if len(lines_buffer) == window_size:
                         # Combine all lines in current window for searching
-                        combined_text = " ".join(lines_buffer)
+                        combined_text = "\n".join(lines_buffer)
                         search_text = (
                             combined_text
                             if case_sensitive

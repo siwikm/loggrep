@@ -21,6 +21,7 @@ def search_phrases_in_file(
     show_line_numbers: bool = True,
     files_only: bool = False,
     count_only: bool = False,
+    window_size: int = 1,
 ) -> int:
     """
     Searches for lines containing specified phrases in a file.
@@ -32,13 +33,14 @@ def search_phrases_in_file(
       show_line_numbers -- include line numbers in printed matches
       files_only -- print only file name when first match found (like grep -l)
       count_only -- do not print matching lines, only counts per file
+      window_size -- search phrases within a window of N adjacent lines (default: 1)
 
     Returns: number of matching lines found
     """
     matches = 0
 
     if verbose:
-        logger.info(f"Searching file: {file_path}")
+        logger.info(f"Searching file: {file_path} (window size: {window_size})")
 
     # Prepare phrases once (avoid doing this per-line)
     if case_sensitive:
@@ -53,66 +55,149 @@ def search_phrases_in_file(
             if verbose:
                 logger.info("  File loading completed successfully")
 
-            for line_num, line in enumerate(file, 1):
-                # Keep original line content but strip only newline characters
-                line_content = line.rstrip("\n").rstrip("\r")
+            if window_size == 1:
+                # Original single-line search logic
+                for line_num, line in enumerate(file, 1):
+                    # Keep original line content but strip only newline characters
+                    line_content = line.rstrip("\n").rstrip("\r")
 
-                # Prepare line for comparison
-                search_line = (
-                    line_content if case_sensitive else line_content.casefold()
-                )
+                    # Prepare line for comparison
+                    search_line = (
+                        line_content if case_sensitive else line_content.casefold()
+                    )
 
-                # Check if phrases are in the line
-                if match_all:
-                    ok = all(phrase in search_line for phrase in search_phrases)
-                else:
-                    ok = any(phrase in search_line for phrase in search_phrases)
+                    # Check if phrases are in the line
+                    if match_all:
+                        ok = all(phrase in search_line for phrase in search_phrases)
+                    else:
+                        ok = any(phrase in search_line for phrase in search_phrases)
 
-                if ok:
-                    matches += 1
+                    if ok:
+                        matches += 1
 
-                    # files_only: print filename once and stop scanning this file
-                    if files_only:
+                        # files_only: print filename once and stop scanning this file
+                        if files_only:
+                            if print_results:
+                                print(file_path)
+                            if output_file:
+                                try:
+                                    output_file.write(file_path + "\n")
+                                except Exception:
+                                    if verbose:
+                                        logger.error(
+                                            f"  ERROR: Failed to write filename to output while processing {file_path}"
+                                        )
+                            return matches
+
+                        # count_only: do not print matching lines, continue to count
+                        if count_only:
+                            continue
+
+                        # normal: print/write matching line, respect show_line_numbers
+                        if show_line_numbers:
+                            out = f"{file_path}:{line_num}: {line_content}"
+                        else:
+                            out = f"{file_path}: {line_content}"
+
                         if print_results:
-                            print(file_path)
+                            print(out)
                         if output_file:
                             try:
-                                output_file.write(file_path + "\n")
+                                output_file.write(out + "\n")
                             except Exception:
+                                # avoid breaking the scan if writing fails
                                 if verbose:
                                     logger.error(
-                                        f"  ERROR: Failed to write filename to output while processing {file_path}"
+                                        f"  ERROR: Failed to write to output file while processing {file_path}"
                                     )
-                        return matches
+            else:
+                # Window-based search logic for adjacent lines
+                lines_buffer = []  # Buffer to hold current window
+                line_numbers_buffer = []  # Track line numbers for current window
 
-                    # count_only: do not print matching lines, continue to count
-                    if count_only:
-                        continue
+                for line_num, line in enumerate(file, 1):
+                    line_content = line.rstrip("\n").rstrip("\r")
 
-                    # normal: print/write matching line, respect show_line_numbers
-                    if show_line_numbers:
-                        out = f"{file_path}:{line_num}: {line_content}"
-                    else:
-                        out = f"{file_path}: {line_content}"
+                    # Add current line to window
+                    lines_buffer.append(line_content)
+                    line_numbers_buffer.append(line_num)
 
-                    if print_results:
-                        print(out)
-                    if output_file:
-                        try:
-                            output_file.write(out + "\n")
-                        except Exception:
-                            # avoid breaking the scan if writing fails
-                            if verbose:
-                                logger.error(
-                                    f"  ERROR: Failed to write to output file while processing {file_path}"
+                    # Keep only last window_size lines
+                    if len(lines_buffer) > window_size:
+                        lines_buffer.pop(0)
+                        line_numbers_buffer.pop(0)
+
+                    # Only search when we have a full window
+                    if len(lines_buffer) == window_size:
+                        # Combine all lines in current window for searching
+                        combined_text = " ".join(lines_buffer)
+                        search_text = (
+                            combined_text
+                            if case_sensitive
+                            else combined_text.casefold()
+                        )
+
+                        # Check if phrases are found in the window
+                        if match_all:
+                            found = all(
+                                phrase in search_text for phrase in search_phrases
+                            )
+                        else:
+                            found = any(
+                                phrase in search_text for phrase in search_phrases
+                            )
+
+                        if found:
+                            matches += 1
+
+                            # files_only: print filename once and stop
+                            if files_only:
+                                if print_results:
+                                    print(file_path)
+                                if output_file:
+                                    try:
+                                        output_file.write(file_path + "\n")
+                                    except Exception:
+                                        if verbose:
+                                            logger.error(
+                                                f"Failed to write filename to output"
+                                            )
+                                return matches
+
+                            # count_only: just count, don't print lines
+                            if count_only:
+                                continue
+
+                            # Normal output: show the window
+                            start_line = line_numbers_buffer[0]
+                            end_line = line_numbers_buffer[-1]
+                            if show_line_numbers:
+                                out = f"{file_path}:{start_line}-{end_line}:\n"
+                                for i, (ln, content) in enumerate(
+                                    zip(line_numbers_buffer, lines_buffer)
+                                ):
+                                    prefix = "  " if i > 0 else ""
+                                    out += f"{prefix}{ln}: {content}\n"
+                                out = out.rstrip("\n")  # Remove trailing newline
+                            else:
+                                out = f"{file_path}:\n" + "\n".join(
+                                    f"  {line}" for line in lines_buffer
                                 )
+
+                            if print_results:
+                                print(out)
+                            if output_file:
+                                try:
+                                    output_file.write(out + "\n")
+                                except Exception:
+                                    if verbose:
+                                        logger.error(f"Failed to write to output file")
 
     except FileNotFoundError:
         logger.error(f"Error: File {file_path} not found.")
     except Exception as e:
-        logger.error(f"  ERROR: Unexpected error reading file {file_path}: {e}")
+        logger.error(f"ERROR: Unexpected error reading file {file_path}: {e}")
 
-    # If count_only was requested and printing of per-file count is desired, caller will handle.
     if verbose:
         logger.info(f"  Search completed, found {matches} matches")
 
@@ -248,6 +333,13 @@ def main():
         action="store_true",
         help="Only print names of files that contain matches (like grep -l)",
     )
+    parser.add_argument(
+        "-w",
+        "--window",
+        type=int,
+        default=1,
+        help="Search phrases within a window of N adjacent lines (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -281,7 +373,7 @@ def main():
             f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
         )
         print(
-            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}"
+            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}, window={args.window}"
         )
         print("-" * 60)
     else:
@@ -312,6 +404,7 @@ def main():
                 show_line_numbers=not args.no_line_numbers,
                 files_only=args.files_only,
                 count_only=args.count,
+                window_size=args.window,
             )
             total_matches += matches
 
@@ -393,7 +486,10 @@ if __name__ == "__main__":
         print("7. Detailed operation logs:")
         print("   python3 loggrep.py /var/logs/ 'ERROR' --recursive --verbose")
         print()
-        print("8. Programmatic usage:")
+        print("8. Search within adjacent lines (window):")
+        print("   python3 loggrep.py app.log 'ERROR' 'database' --window 3")
+        print()
+        print("9. Programmatic usage:")
         print()
 
         # Programmatic example

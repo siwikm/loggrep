@@ -7,12 +7,13 @@ No external dependencies — requires Python 3.8+.
 
 - Python 3.8 or newer
 
-## Installation (global)
+## Installation (global)F
 
 On macOS, Debian, Ubuntu — copy the script to a system binary directory and make it executable:
 
 ```sh
 # while in the project directory
+wget https://raw.githubusercontent.com/siwikm/loggrep/main/loggrep.py
 sudo cp loggrep.py /usr/local/bin/loggrep
 sudo chmod +x /usr/local/bin/loggrep
 ```

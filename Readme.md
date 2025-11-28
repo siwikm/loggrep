@@ -13,6 +13,7 @@ On macOS, Debian, Ubuntu — copy the script to a system binary directory and ma
 
 ```sh
 # while in the project directory
+wget https://raw.githubusercontent.com/siwikm/loggrep/main/loggrep.py
 sudo cp loggrep.py /usr/local/bin/loggrep
 sudo chmod +x /usr/local/bin/loggrep
 ```

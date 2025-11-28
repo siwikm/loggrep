@@ -191,7 +191,7 @@ def search_phrases_in_file(
                                     output_file.write(out + "\n")
                                 except Exception:
                                     if verbose:
-                                        logger.error(f"Failed to write to output file")
+                                        logger.error(f"Failed to write to output file while processing {file_path}")
 
     except FileNotFoundError:
         logger.error(f"Error: File {file_path} not found.")

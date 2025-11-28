@@ -115,6 +115,69 @@ def search_phrases_in_file(
                 lines_buffer = []  # Buffer to hold current window
                 line_numbers_buffer = []  # Track line numbers for current window
 
+                def process_window(
+                    buffer_lines: List[str], buffer_numbers: List[int]
+                ) -> bool:
+                    nonlocal matches
+
+                    if not buffer_lines:
+                        return False
+
+                    combined_text = " ".join(buffer_lines)
+                    search_text = (
+                        combined_text if case_sensitive else combined_text.casefold()
+                    )
+
+                    if match_all:
+                        found = all(phrase in search_text for phrase in search_phrases)
+                    else:
+                        found = any(phrase in search_text for phrase in search_phrases)
+
+                    if not found:
+                        return False
+
+                    matches += 1
+
+                    if files_only:
+                        if print_results:
+                            print(file_path)
+                        if output_file:
+                            try:
+                                output_file.write(file_path + "\n")
+                            except Exception:
+                                if verbose:
+                                    logger.error("Failed to write filename to output")
+                        return True
+
+                    if count_only:
+                        return False
+
+                    start_line = buffer_numbers[0]
+                    end_line = buffer_numbers[-1]
+                    if show_line_numbers:
+                        out = f"{file_path}:{start_line}-{end_line}:\n"
+                        for i, (ln, content) in enumerate(
+                            zip(buffer_numbers, buffer_lines)
+                        ):
+                            prefix = "  " if i > 0 else ""
+                            out += f"{prefix}{ln}: {content}\n"
+                        out = out.rstrip("\n")
+                    else:
+                        out = f"{file_path}:\n" + "\n".join(
+                            f"  {line}" for line in buffer_lines
+                        )
+
+                    if print_results:
+                        print(out)
+                    if output_file:
+                        try:
+                            output_file.write(out + "\n")
+                        except Exception:
+                            if verbose:
+                                logger.error("Failed to write to output file")
+
+                    return False
+
                 for line_num, line in enumerate(file, 1):
                     line_content = line.rstrip("\n").rstrip("\r")
 
@@ -129,69 +192,13 @@ def search_phrases_in_file(
 
                     # Only search when we have a full window
                     if len(lines_buffer) == window_size:
-                        # Combine all lines in current window for searching
-                        combined_text = " ".join(lines_buffer)
-                        search_text = (
-                            combined_text
-                            if case_sensitive
-                            else combined_text.casefold()
-                        )
+                        if process_window(lines_buffer, line_numbers_buffer):
+                            return matches
 
-                        # Check if phrases are found in the window
-                        if match_all:
-                            found = all(
-                                phrase in search_text for phrase in search_phrases
-                            )
-                        else:
-                            found = any(
-                                phrase in search_text for phrase in search_phrases
-                            )
-
-                        if found:
-                            matches += 1
-
-                            # files_only: print filename once and stop
-                            if files_only:
-                                if print_results:
-                                    print(file_path)
-                                if output_file:
-                                    try:
-                                        output_file.write(file_path + "\n")
-                                    except Exception:
-                                        if verbose:
-                                            logger.error(
-                                                f"Failed to write filename to output"
-                                            )
-                                return matches
-
-                            # count_only: just count, don't print lines
-                            if count_only:
-                                continue
-
-                            # Normal output: show the window
-                            start_line = line_numbers_buffer[0]
-                            end_line = line_numbers_buffer[-1]
-                            if show_line_numbers:
-                                out = f"{file_path}:{start_line}-{end_line}:\n"
-                                for i, (ln, content) in enumerate(
-                                    zip(line_numbers_buffer, lines_buffer)
-                                ):
-                                    prefix = "  " if i > 0 else ""
-                                    out += f"{prefix}{ln}: {content}\n"
-                                out = out.rstrip("\n")  # Remove trailing newline
-                            else:
-                                out = f"{file_path}:\n" + "\n".join(
-                                    f"  {line}" for line in lines_buffer
-                                )
-
-                            if print_results:
-                                print(out)
-                            if output_file:
-                                try:
-                                    output_file.write(out + "\n")
-                                except Exception:
-                                    if verbose:
-                                        logger.error(f"Failed to write to output file")
+                # Handle partial window at end of file (file shorter than window_size)
+                if lines_buffer and len(lines_buffer) < window_size:
+                    if process_window(lines_buffer, line_numbers_buffer):
+                        return matches
 
     except FileNotFoundError:
         logger.error(f"Error: File {file_path} not found.")
@@ -453,8 +460,8 @@ def main():
         if output_handle:
             try:
                 output_handle.close()
-            except Exception:
-                pass
+            except Exception as close_error:
+                logger.warning(f"Failed to close output file: {close_error}")
 
 
 # Usage examples

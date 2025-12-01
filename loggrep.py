@@ -5,10 +5,42 @@ import sys
 import argparse
 from pathlib import Path
 from typing import List, Optional, TextIO, Tuple
+from dataclasses import dataclass
 import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+# Configuration Objects
+@dataclass
+class SearchConfig:
+    """Configuration for search operations."""
+
+    phrases: List[str]
+    case_sensitive: bool = False
+    match_all: bool = True
+    window_size: int = 1
+
+
+@dataclass
+class OutputConfig:
+    """Configuration for output formatting."""
+
+    output_file: Optional[TextIO] = None
+    show_line_numbers: bool = True
+    print_results: bool = True
+    count_only: bool = False
+    files_only: bool = False
+
+
+@dataclass
+class RuntimeConfig:
+    """Runtime configuration."""
+
+    verbose: bool = False
+    recursive: bool = False
+    include_patterns: Optional[List[str]] = None
 
 
 def process_window(
@@ -16,15 +48,9 @@ def process_window(
     buffer_numbers: List[int],
     file_path: str,
     search_phrases: List[str],
-    *,
-    case_sensitive: bool,
-    match_all: bool,
-    print_results: bool,
-    show_line_numbers: bool,
-    files_only: bool,
-    count_only: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> Tuple[bool, bool]:
     """Process a window of lines and return (match_found, should_stop)."""
 
@@ -32,9 +58,11 @@ def process_window(
         return False, False
 
     combined_text = " ".join(buffer_lines)
-    search_text = combined_text if case_sensitive else combined_text.casefold()
+    search_text = (
+        combined_text if search_config.case_sensitive else combined_text.casefold()
+    )
 
-    if match_all:
+    if search_config.match_all:
         found = all(phrase in search_text for phrase in search_phrases)
     else:
         found = any(phrase in search_text for phrase in search_phrases)
@@ -42,23 +70,16 @@ def process_window(
     if not found:
         return False, False
 
-    if files_only:
-        if print_results:
-            print(file_path)
-        if output_file:
-            try:
-                output_file.write(file_path + "\n")
-            except Exception:
-                if verbose:
-                    logger.error("Failed to write filename to output")
+    if output_config.files_only:
+        _handle_files_only_match(file_path, output_config, runtime_config)
         return True, True
 
-    if count_only:
+    if output_config.count_only:
         return True, False
 
     start_line = buffer_numbers[0]
     end_line = buffer_numbers[-1]
-    if show_line_numbers:
+    if output_config.show_line_numbers:
         out = f"{file_path}:{start_line}-{end_line}:\n"
         for i, (ln, content) in enumerate(zip(buffer_numbers, buffer_lines)):
             prefix = "  " if i > 0 else ""
@@ -67,14 +88,11 @@ def process_window(
     else:
         out = f"{file_path}:\n" + "\n".join(f"  {line}" for line in buffer_lines)
 
-    if print_results:
+    if output_config.print_results:
         print(out)
-    if output_file:
-        try:
-            output_file.write(out + "\n")
-        except Exception:
-            if verbose:
-                logger.error("Failed to write to output file")
+    _write_to_output_file(
+        output_config.output_file, out, file_path, runtime_config.verbose
+    )
 
     return True, False
 
@@ -123,7 +141,7 @@ def _format_match_output(
 
 
 def _write_to_output_file(
-    output_file: Optional[TextIO], content: str, file_path: str, verbose: bool
+    output_file: Optional[TextIO], content: str, file_path: str, verbose: bool = False
 ) -> None:
     """Write content to output file with error handling."""
     if output_file:
@@ -138,44 +156,42 @@ def _write_to_output_file(
 
 def _handle_files_only_match(
     file_path: str,
-    print_results: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> None:
     """Handle output when files_only mode finds a match."""
-    if print_results:
+    if output_config.print_results:
         print(file_path)
-    _write_to_output_file(output_file, file_path, file_path, verbose)
+    _write_to_output_file(
+        output_config.output_file, file_path, file_path, runtime_config.verbose
+    )
 
 
 def _handle_normal_match(
     file_path: str,
     line_num: int,
     line_content: str,
-    show_line_numbers: bool,
-    print_results: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> None:
     """Handle output for a normal (non-count, non-files-only) match."""
-    output = _format_match_output(file_path, line_num, line_content, show_line_numbers)
-    if print_results:
+    output = _format_match_output(
+        file_path, line_num, line_content, output_config.show_line_numbers
+    )
+    if output_config.print_results:
         print(output)
-    _write_to_output_file(output_file, output, file_path, verbose)
+    _write_to_output_file(
+        output_config.output_file, output, file_path, runtime_config.verbose
+    )
 
 
 def _search_line_by_line(
     file: TextIO,
     file_path: str,
     search_phrases: List[str],
-    case_sensitive: bool,
-    match_all: bool,
-    print_results: bool,
-    show_line_numbers: bool,
-    files_only: bool,
-    count_only: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> int:
     """Search file line by line (window_size=1). Returns number of matches."""
     matches = 0
@@ -186,28 +202,25 @@ def _search_line_by_line(
 
         # Check if line matches search criteria
         if _line_matches_phrases(
-            line_content, search_phrases, case_sensitive, match_all
+            line_content,
+            search_phrases,
+            search_config.case_sensitive,
+            search_config.match_all,
         ):
             matches += 1
 
             # files_only: print filename once and stop scanning this file
-            if files_only:
-                _handle_files_only_match(file_path, print_results, output_file, verbose)
+            if output_config.files_only:
+                _handle_files_only_match(file_path, output_config, runtime_config)
                 return matches
 
             # count_only: do not print matching lines, continue to count
-            if count_only:
+            if output_config.count_only:
                 continue
 
             # normal: print/write matching line
             _handle_normal_match(
-                file_path,
-                line_num,
-                line_content,
-                show_line_numbers,
-                print_results,
-                output_file,
-                verbose,
+                file_path, line_num, line_content, output_config, runtime_config
             )
 
     return matches
@@ -217,15 +230,9 @@ def _search_with_window(
     file: TextIO,
     file_path: str,
     search_phrases: List[str],
-    case_sensitive: bool,
-    match_all: bool,
-    print_results: bool,
-    show_line_numbers: bool,
-    files_only: bool,
-    count_only: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
-    window_size: int,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> int:
     """Search file with window of adjacent lines. Returns number of matches."""
     matches = 0
@@ -240,25 +247,20 @@ def _search_with_window(
         line_numbers_buffer.append(line_num)
 
         # Keep only last window_size lines
-        if len(lines_buffer) > window_size:
+        if len(lines_buffer) > search_config.window_size:
             lines_buffer.pop(0)
             line_numbers_buffer.pop(0)
 
         # Only search when we have a full window
-        if len(lines_buffer) == window_size:
+        if len(lines_buffer) == search_config.window_size:
             match_found, should_stop = process_window(
                 lines_buffer,
                 line_numbers_buffer,
                 file_path,
                 search_phrases,
-                case_sensitive=case_sensitive,
-                match_all=match_all,
-                print_results=print_results,
-                show_line_numbers=show_line_numbers,
-                files_only=files_only,
-                count_only=count_only,
-                output_file=output_file,
-                verbose=verbose,
+                search_config,
+                output_config,
+                runtime_config,
             )
             if match_found:
                 matches += 1
@@ -266,20 +268,15 @@ def _search_with_window(
                 return matches
 
     # Handle partial window at end of file (file shorter than window_size)
-    if lines_buffer and len(lines_buffer) < window_size:
+    if lines_buffer and len(lines_buffer) < search_config.window_size:
         match_found, should_stop = process_window(
             lines_buffer,
             line_numbers_buffer,
             file_path,
             search_phrases,
-            case_sensitive=case_sensitive,
-            match_all=match_all,
-            print_results=print_results,
-            show_line_numbers=show_line_numbers,
-            files_only=files_only,
-            count_only=count_only,
-            output_file=output_file,
-            verbose=verbose,
+            search_config,
+            output_config,
+            runtime_config,
         )
         if match_found:
             matches += 1
@@ -291,76 +288,62 @@ def _search_with_window(
 
 def search_phrases_in_file(
     file_path: str,
-    phrases: List[str],
-    case_sensitive: bool = False,
-    match_all: bool = True,
-    verbose: bool = False,
-    output_file: Optional[TextIO] = None,
-    print_results: bool = True,
-    show_line_numbers: bool = True,
-    files_only: bool = False,
-    count_only: bool = False,
-    window_size: int = 1,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> int:
     """
     Searches for lines containing specified phrases in a file.
 
     This streaming version does NOT accumulate results in memory.
-    It prints matches immediately and optionally writes them to `output_file`.
+    It prints matches immediately and optionally writes them to output_file.
 
-    Options:
-      show_line_numbers -- include line numbers in printed matches
-      files_only -- print only file name when first match found (like grep -l)
-      count_only -- do not print matching lines, only counts per file
-      window_size -- search phrases within a window of N adjacent lines (default: 1)
+    Args:
+        file_path: Path to the file to search
+        search_config: Search configuration (phrases, case sensitivity, match mode, window size)
+        output_config: Output configuration (formatting, output file, modes)
+        runtime_config: Runtime configuration (verbose, recursive, include patterns)
 
     Returns: number of matching lines found
     """
-    if verbose:
-        logger.info(f"Searching file: {file_path} (window size: {window_size})")
+    if runtime_config.verbose:
+        logger.info(
+            f"Searching file: {file_path} (window size: {search_config.window_size})"
+        )
 
     # Early validation - fail fast
     if not _validate_file_exists(file_path):
         return 0
 
     # Prepare phrases once (avoid doing this per-line)
-    search_phrases = _prepare_search_phrases(phrases, case_sensitive)
+    search_phrases = _prepare_search_phrases(
+        search_config.phrases, search_config.case_sensitive
+    )
 
     try:
         # errors='replace' prevents crashes on bad encoding while keeping streaming
         with open(file_path, "r", encoding="utf-8", errors="replace") as file:
-            if verbose:
+            if runtime_config.verbose:
                 logger.info("  File loading completed successfully")
 
             # Delegate to appropriate search method
-            if window_size == 1:
+            if search_config.window_size == 1:
                 matches = _search_line_by_line(
                     file,
                     file_path,
                     search_phrases,
-                    case_sensitive,
-                    match_all,
-                    print_results,
-                    show_line_numbers,
-                    files_only,
-                    count_only,
-                    output_file,
-                    verbose,
+                    search_config,
+                    output_config,
+                    runtime_config,
                 )
             else:
                 matches = _search_with_window(
                     file,
                     file_path,
                     search_phrases,
-                    case_sensitive,
-                    match_all,
-                    print_results,
-                    show_line_numbers,
-                    files_only,
-                    count_only,
-                    output_file,
-                    verbose,
-                    window_size,
+                    search_config,
+                    output_config,
+                    runtime_config,
                 )
 
     except PermissionError:
@@ -370,7 +353,7 @@ def search_phrases_in_file(
         logger.error(f"ERROR: Unexpected error reading file {file_path}: {e}")
         return 0
 
-    if verbose:
+    if runtime_config.verbose:
         logger.info(f"  Search completed, found {matches} matches")
 
     return matches
@@ -597,20 +580,35 @@ def main():
                 logger.info(f"Opening output file: {args.output}")
             output_handle = open(args.output, "w", encoding="utf-8")
 
+        # Create config objects from args
+        search_config = SearchConfig(
+            phrases=args.phrases,
+            case_sensitive=not args.ignore_case,
+            match_all=not args.any,
+            window_size=args.window,
+        )
+
+        output_config = OutputConfig(
+            output_file=output_handle,
+            show_line_numbers=not args.no_line_numbers,
+            print_results=not args.count and not args.files_only,
+            count_only=args.count,
+            files_only=args.files_only,
+        )
+
+        runtime_config = RuntimeConfig(
+            verbose=args.verbose,
+            recursive=args.recursive,
+            include_patterns=args.include_patterns,
+        )
+
         # Search each file (streaming; results printed/written immediately)
         for file_path in files_to_search:
             matches = search_phrases_in_file(
                 file_path=file_path,
-                phrases=args.phrases,
-                case_sensitive=not args.ignore_case,
-                match_all=not args.any,
-                verbose=args.verbose,
-                output_file=output_handle,
-                print_results=not args.count and not args.files_only,
-                show_line_numbers=not args.no_line_numbers,
-                files_only=args.files_only,
-                count_only=args.count,
-                window_size=args.window,
+                search_config=search_config,
+                output_config=output_config,
+                runtime_config=runtime_config,
             )
             total_matches += matches
 

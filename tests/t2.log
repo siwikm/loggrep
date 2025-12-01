@@ -6,16 +6,16 @@
 2023-02-08 16:50:53,551 INFO	task_runner.py	run:	Task 'size_of_single_extract': Starting task run...
 2023-02-08 16:50:53,554 INFO	task_runner.py	run:	Task 'size_of_single_extract': Finished task run for task with final state: 'Success'
 2023-02-08 16:50:53,559 INFO	task_runner.py	run:	Task 'get_key_name_for_project_id': Starting task run...
-2023-02-08 16:50:53,666 INFO	gcp_key.py	get_gcp_key_name:	Downloaded key: ita-klient-pelion-d7925df8c5ba.json for project_id: 2
-2023-02-08 16:50:53,668 INFO	gcp_stocks_v2.py	get_key_name_for_project_id:	Downloaded ita-klient-pelion-d7925df8c5ba.json for 2
+2023-02-08 16:50:53,666 INFO	gcp_key.py	get_gcp_key_name:	Downloaded key: ita-klient-d7925df8c5ba.json for project_id: 2
+2023-02-08 16:50:53,668 INFO	gcp_stocks_v2.py	get_key_name_for_project_id:	Downloaded ita-klient-d7925df8c5ba.json for 2
 2023-02-08 16:50:53,672 INFO	task_runner.py	run:	Task 'get_key_name_for_project_id': Finished task run for task with final state: 'Success'
 2023-02-08 16:50:53,678 INFO	task_runner.py	run:	Task 'get_last_modify_time_from_local_data': Starting task run...
 2023-02-08 16:50:53,680 INFO	gcp_stocks_v2.py	get_last_modify_time_from_local_data:	Downloaded 2023-02-08 14:00:00 for command '2023-02-08T14:00:00Z'
 2023-02-08 16:50:53,683 INFO	task_runner.py	run:	Task 'get_last_modify_time_from_local_data': Finished task run for task with final state: 'Success'
 2023-02-08 16:50:53,688 INFO	task_runner.py	run:	Task 'load_local_gcp_auth_key': Starting task run...
 2023-02-08 16:50:53,699 INFO	gcp_key.py	read_gcp_keys_as_jsons:	read successfully 3 keys.
- ['ita-klient-pelion-0ecbaa1371ea.json', 'ita-klient-pelion-d7925df8c5ba.json', 'ita-klient-pelion-fb4efda7b7da.json']
-2023-02-08 16:50:53,700 INFO	gcp_stocks_v2.py	load_local_gcp_auth_key:	Downloaded dict_keys(['ita-klient-pelion-0ecbaa1371ea.json', 'ita-klient-pelion-d7925df8c5ba.json', 'ita-klient-pelion-fb4efda7b7da.json']) and picked ita-klient-pelion-d7925df8c5ba.json based on project id
+ ['ita-klient-0ecbaa1371ea.json', 'ita-klient-d7925df8c5ba.json', 'ita-klient-fb4efda7b7da.json']
+2023-02-08 16:50:53,700 INFO	gcp_stocks_v2.py	load_local_gcp_auth_key:	Downloaded dict_keys(['ita-klient-0ecbaa1371ea.json', 'ita-klient-d7925df8c5ba.json', 'ita-klient-fb4efda7b7da.json']) and picked ita-klient-d7925df8c5ba.json based on project id
 2023-02-08 16:50:53,704 INFO	task_runner.py	run:	Task 'load_local_gcp_auth_key': Finished task run for task with final state: 'Success'
 2023-02-08 16:50:53,709 INFO	task_runner.py	run:	Task 'get_pages': Starting task run...
 2023-02-08 16:50:54,587 INFO	gcp_stocks_v2.py	get_pages:	Downloaded 4 as num of pages
@@ -38,7 +38,7 @@
                 DATA_ZAKUPU as data_zakupu,
                 DATA_AKTUALIZACJI_APTEKA as data_aktualizacji_apteka,
                 DATA_AKTUALIZACJI_FP as data_aktualizacji_fp 
-            FROM `ita-klient-pelion`.main.stock_2
+            FROM `ita-klient-`.main.stock_2
             where
                 ean is not null
                 and ID_PODMIOT is not null

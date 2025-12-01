@@ -40,6 +40,20 @@ for f in $(find /var/log/myapp -name '*.log' -mtime -1); do
 done
 ```
 
+6) Filter files by extension (recursive search):
+
+```sh
+# Search only .log files in /var/logs
+# Important: Always quote glob patterns to prevent shell expansion!
+loggrep /var/logs 'ERROR' -r -e '*.log'
+
+# Search both .log and .txt files
+loggrep /var/logs 'ERROR' -r -e '*.log' -e '*.txt'
+
+# In a mixed directory structure (logs, configs, docs), focus on log files only
+loggrep /app/data 'timeout' 'connection' -r -e '*.log' -e '*.out'
+```
+
 ## Notes
 - When using the tool in scripts, prefer the `-o` option to write results to a single file instead of aggregating stdout in loops.
 - For very large directories use `--recursive` cautiously — it will traverse all subdirectories.

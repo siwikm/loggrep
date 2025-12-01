@@ -5,10 +5,95 @@ import sys
 import argparse
 from pathlib import Path
 from typing import List, Optional, TextIO, Tuple
+from dataclasses import dataclass
 import logging
 
 
-logger = logging.getLogger(__name__)
+# Verbose Logger Class
+class VerboseLogger:
+    """Logger that handles verbosity checks internally."""
+
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+        self._logger = logging.getLogger(__name__)
+
+    def info(self, msg: str):
+        """Only logs if verbose mode is enabled."""
+        if self.verbose:
+            self._logger.info(msg)
+
+    def error(self, msg: str):
+        """Always logs errors."""
+        self._logger.error(msg)
+
+    def warning(self, msg: str):
+        """Always logs warnings."""
+        self._logger.warning(msg)
+
+
+# Default logger instance (will be replaced in main with verbose setting)
+logger = VerboseLogger()
+
+
+# Configuration Objects
+@dataclass
+class SearchConfig:
+    """Configuration for search operations."""
+
+    phrases: List[str]
+    case_sensitive: bool = False
+    match_all: bool = True
+    window_size: int = 1
+
+
+@dataclass
+class OutputConfig:
+    """Configuration for output formatting."""
+
+    output_file: Optional[TextIO] = None
+    show_line_numbers: bool = True
+    print_results: bool = True
+    count_only: bool = False
+    files_only: bool = False
+
+
+@dataclass
+class RuntimeConfig:
+    """Runtime configuration."""
+
+    logger: VerboseLogger
+    recursive: bool = False
+    include_patterns: Optional[List[str]] = None
+
+
+def _format_window_output(
+    file_path: str,
+    buffer_lines: List[str],
+    buffer_numbers: List[int],
+    show_line_numbers: bool,
+) -> str:
+    """Format window match output.
+
+    Args:
+        file_path: Path to the file being searched
+        buffer_lines: Lines in the matching window
+        buffer_numbers: Line numbers for each line in window
+        show_line_numbers: Whether to include line numbers in output
+
+    Returns:
+        Formatted output string
+    """
+    start_line = buffer_numbers[0]
+    end_line = buffer_numbers[-1]
+
+    if show_line_numbers:
+        out = f"{file_path}:{start_line}-{end_line}:\n"
+        for i, (ln, content) in enumerate(zip(buffer_numbers, buffer_lines)):
+            prefix = "  " if i > 0 else ""
+            out += f"{prefix}{ln}: {content}\n"
+        return out.rstrip("\n")
+    else:
+        return f"{file_path}:\n" + "\n".join(f"  {line}" for line in buffer_lines)
 
 
 def process_window(
@@ -16,15 +101,9 @@ def process_window(
     buffer_numbers: List[int],
     file_path: str,
     search_phrases: List[str],
-    *,
-    case_sensitive: bool,
-    match_all: bool,
-    print_results: bool,
-    show_line_numbers: bool,
-    files_only: bool,
-    count_only: bool,
-    output_file: Optional[TextIO],
-    verbose: bool,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> Tuple[bool, bool]:
     """Process a window of lines and return (match_found, should_stop)."""
 
@@ -32,9 +111,11 @@ def process_window(
         return False, False
 
     combined_text = " ".join(buffer_lines)
-    search_text = combined_text if case_sensitive else combined_text.casefold()
+    search_text = (
+        combined_text if search_config.case_sensitive else combined_text.casefold()
+    )
 
-    if match_all:
+    if search_config.match_all:
         found = all(phrase in search_text for phrase in search_phrases)
     else:
         found = any(phrase in search_text for phrase in search_phrases)
@@ -42,215 +123,401 @@ def process_window(
     if not found:
         return False, False
 
-    if files_only:
-        if print_results:
-            print(file_path)
-        if output_file:
-            try:
-                output_file.write(file_path + "\n")
-            except Exception:
-                if verbose:
-                    logger.error("Failed to write filename to output")
+    if output_config.files_only:
+        _handle_files_only_match(file_path, output_config, runtime_config)
         return True, True
 
-    if count_only:
+    if output_config.count_only:
         return True, False
 
-    start_line = buffer_numbers[0]
-    end_line = buffer_numbers[-1]
-    if show_line_numbers:
-        out = f"{file_path}:{start_line}-{end_line}:\n"
-        for i, (ln, content) in enumerate(zip(buffer_numbers, buffer_lines)):
-            prefix = "  " if i > 0 else ""
-            out += f"{prefix}{ln}: {content}\n"
-        out = out.rstrip("\n")
-    else:
-        out = f"{file_path}:\n" + "\n".join(f"  {line}" for line in buffer_lines)
+    # Format and output the window match
+    out = _format_window_output(
+        file_path, buffer_lines, buffer_numbers, output_config.show_line_numbers
+    )
 
-    if print_results:
+    if output_config.print_results:
         print(out)
-    if output_file:
-        try:
-            output_file.write(out + "\n")
-        except Exception:
-            if verbose:
-                logger.error("Failed to write to output file")
+    _write_to_output_file(
+        output_config.output_file, out, file_path, runtime_config.logger
+    )
 
     return True, False
 
 
+def _validate_file_exists(file_path: str) -> bool:
+    """Check if file exists and is accessible. Returns True if valid."""
+    path_obj = Path(file_path)
+    if not path_obj.exists():
+        logger.error(f"Error: File {file_path} not found.")
+        return False
+    if not path_obj.is_file():
+        logger.error(f"Error: {file_path} is not a file.")
+        return False
+    return True
+
+
+def _prepare_search_phrases(phrases: List[str], case_sensitive: bool) -> List[str]:
+    """Prepare phrases for searching (case-folding if needed)."""
+    if case_sensitive:
+        return phrases
+    else:
+        # use casefold for better Unicode case-insensitive matching
+        return [p.casefold() for p in phrases]
+
+
+def _line_matches_phrases(
+    line: str, search_phrases: List[str], case_sensitive: bool, match_all: bool
+) -> bool:
+    """Check if a line matches the search criteria."""
+    search_line = line if case_sensitive else line.casefold()
+
+    if match_all:
+        return all(phrase in search_line for phrase in search_phrases)
+    else:
+        return any(phrase in search_line for phrase in search_phrases)
+
+
+def _format_match_output(
+    file_path: str, line_num: int, line_content: str, show_line_numbers: bool
+) -> str:
+    """Format a matching line for output."""
+    if show_line_numbers:
+        return f"{file_path}:{line_num}: {line_content}"
+    else:
+        return f"{file_path}: {line_content}"
+
+
+def _open_output_file(output_path: str, vlogger: VerboseLogger) -> Optional[TextIO]:
+    """Open output file with early error handling.
+
+    Returns:
+        File handle or None if opening failed
+    """
+    try:
+        vlogger.info(f"Opening output file: {output_path}")
+        return open(output_path, "w", encoding="utf-8")
+    except PermissionError:
+        logger.error(f"Error: Permission denied writing to {output_path}")
+        return None
+    except OSError as e:
+        logger.error(f"Error: Cannot create output file {output_path}: {e}")
+        return None
+
+
+def _write_to_output_file(
+    output_file: Optional[TextIO],
+    content: str,
+    file_path: str,
+    vlogger: VerboseLogger,
+) -> None:
+    """Write content to output file with error handling."""
+    if output_file:
+        try:
+            output_file.write(content + "\n")
+        except Exception:
+            vlogger.error(
+                f"  ERROR: Failed to write to output file while processing {file_path}"
+            )
+
+
+def _handle_files_only_match(
+    file_path: str,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+) -> None:
+    """Handle output when files_only mode finds a match."""
+    if output_config.print_results:
+        print(file_path)
+    _write_to_output_file(
+        output_config.output_file, file_path, file_path, runtime_config.logger
+    )
+
+
+def _handle_normal_match(
+    file_path: str,
+    line_num: int,
+    line_content: str,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+) -> None:
+    """Handle output for a normal (non-count, non-files-only) match."""
+    output = _format_match_output(
+        file_path, line_num, line_content, output_config.show_line_numbers
+    )
+    if output_config.print_results:
+        print(output)
+    _write_to_output_file(
+        output_config.output_file, output, file_path, runtime_config.logger
+    )
+
+
+def _search_line_by_line(
+    file: TextIO,
+    file_path: str,
+    search_phrases: List[str],
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+) -> int:
+    """Search file line by line (window_size=1). Returns number of matches."""
+    matches = 0
+
+    for line_num, line in enumerate(file, 1):
+        # Keep original line content but strip only newline characters
+        line_content = line.rstrip("\n").rstrip("\r")
+
+        # Check if line matches search criteria
+        if _line_matches_phrases(
+            line_content,
+            search_phrases,
+            search_config.case_sensitive,
+            search_config.match_all,
+        ):
+            matches += 1
+
+            # files_only: print filename once and stop scanning this file
+            if output_config.files_only:
+                _handle_files_only_match(file_path, output_config, runtime_config)
+                return matches
+
+            # count_only: do not print matching lines, continue to count
+            if output_config.count_only:
+                continue
+
+            # normal: print/write matching line
+            _handle_normal_match(
+                file_path, line_num, line_content, output_config, runtime_config
+            )
+
+    return matches
+
+
+def _search_with_window(
+    file: TextIO,
+    file_path: str,
+    search_phrases: List[str],
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+) -> int:
+    """Search file with window of adjacent lines. Returns number of matches."""
+    matches = 0
+    lines_buffer = []  # Buffer to hold current window
+    line_numbers_buffer = []  # Track line numbers for current window
+
+    for line_num, line in enumerate(file, 1):
+        line_content = line.rstrip("\n").rstrip("\r")
+
+        # Add current line to window
+        lines_buffer.append(line_content)
+        line_numbers_buffer.append(line_num)
+
+        # Keep only last window_size lines
+        if len(lines_buffer) > search_config.window_size:
+            lines_buffer.pop(0)
+            line_numbers_buffer.pop(0)
+
+        # Only search when we have a full window
+        if len(lines_buffer) == search_config.window_size:
+            match_found, should_stop = process_window(
+                lines_buffer,
+                line_numbers_buffer,
+                file_path,
+                search_phrases,
+                search_config,
+                output_config,
+                runtime_config,
+            )
+            if match_found:
+                matches += 1
+            if should_stop:
+                return matches
+
+    # Handle partial window at end of file (file shorter than window_size)
+    if lines_buffer and len(lines_buffer) < search_config.window_size:
+        match_found, should_stop = process_window(
+            lines_buffer,
+            line_numbers_buffer,
+            file_path,
+            search_phrases,
+            search_config,
+            output_config,
+            runtime_config,
+        )
+        if match_found:
+            matches += 1
+        if should_stop:
+            return matches
+
+    return matches
+
+
 def search_phrases_in_file(
     file_path: str,
-    phrases: List[str],
-    case_sensitive: bool = False,
-    match_all: bool = True,
-    verbose: bool = False,
-    output_file: Optional[TextIO] = None,
-    print_results: bool = True,
-    show_line_numbers: bool = True,
-    files_only: bool = False,
-    count_only: bool = False,
-    window_size: int = 1,
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
 ) -> int:
     """
     Searches for lines containing specified phrases in a file.
 
     This streaming version does NOT accumulate results in memory.
-    It prints matches immediately and optionally writes them to `output_file`.
+    It prints matches immediately and optionally writes them to output_file.
 
-    Options:
-      show_line_numbers -- include line numbers in printed matches
-      files_only -- print only file name when first match found (like grep -l)
-      count_only -- do not print matching lines, only counts per file
-      window_size -- search phrases within a window of N adjacent lines (default: 1)
+    Args:
+        file_path: Path to the file to search
+        search_config: Search configuration (phrases, case sensitivity, match mode, window size)
+        output_config: Output configuration (formatting, output file, modes)
+        runtime_config: Runtime configuration (verbose, recursive, include patterns)
 
     Returns: number of matching lines found
     """
-    matches = 0
+    runtime_config.logger.info(
+        f"Searching file: {file_path} (window size: {search_config.window_size})"
+    )
 
-    if verbose:
-        logger.info(f"Searching file: {file_path} (window size: {window_size})")
+    # Early validation - fail fast
+    if not _validate_file_exists(file_path):
+        return 0
 
     # Prepare phrases once (avoid doing this per-line)
-    if case_sensitive:
-        search_phrases = phrases
-    else:
-        # use casefold for better Unicode case-insensitive matching
-        search_phrases = [p.casefold() for p in phrases]
+    search_phrases = _prepare_search_phrases(
+        search_config.phrases, search_config.case_sensitive
+    )
 
     try:
         # errors='replace' prevents crashes on bad encoding while keeping streaming
         with open(file_path, "r", encoding="utf-8", errors="replace") as file:
-            if verbose:
-                logger.info("  File loading completed successfully")
+            runtime_config.logger.info("  File loading completed successfully")
 
-            if window_size == 1:
-                # Original single-line search logic
-                for line_num, line in enumerate(file, 1):
-                    # Keep original line content but strip only newline characters
-                    line_content = line.rstrip("\n").rstrip("\r")
-
-                    # Prepare line for comparison
-                    search_line = (
-                        line_content if case_sensitive else line_content.casefold()
-                    )
-
-                    # Check if phrases are in the line
-                    if match_all:
-                        ok = all(phrase in search_line for phrase in search_phrases)
-                    else:
-                        ok = any(phrase in search_line for phrase in search_phrases)
-
-                    if ok:
-                        matches += 1
-
-                        # files_only: print filename once and stop scanning this file
-                        if files_only:
-                            if print_results:
-                                print(file_path)
-                            if output_file:
-                                try:
-                                    output_file.write(file_path + "\n")
-                                except Exception:
-                                    if verbose:
-                                        logger.error(
-                                            f"  ERROR: Failed to write filename to output while processing {file_path}"
-                                        )
-                            return matches
-
-                        # count_only: do not print matching lines, continue to count
-                        if count_only:
-                            continue
-
-                        # normal: print/write matching line, respect show_line_numbers
-                        if show_line_numbers:
-                            out = f"{file_path}:{line_num}: {line_content}"
-                        else:
-                            out = f"{file_path}: {line_content}"
-
-                        if print_results:
-                            print(out)
-                        if output_file:
-                            try:
-                                output_file.write(out + "\n")
-                            except Exception:
-                                # avoid breaking the scan if writing fails
-                                if verbose:
-                                    logger.error(
-                                        f"  ERROR: Failed to write to output file while processing {file_path}"
-                                    )
+            # Delegate to appropriate search method
+            if search_config.window_size == 1:
+                matches = _search_line_by_line(
+                    file,
+                    file_path,
+                    search_phrases,
+                    search_config,
+                    output_config,
+                    runtime_config,
+                )
             else:
-                # Window-based search logic for adjacent lines
-                lines_buffer = []  # Buffer to hold current window
-                line_numbers_buffer = []  # Track line numbers for current window
+                matches = _search_with_window(
+                    file,
+                    file_path,
+                    search_phrases,
+                    search_config,
+                    output_config,
+                    runtime_config,
+                )
 
-                for line_num, line in enumerate(file, 1):
-                    line_content = line.rstrip("\n").rstrip("\r")
-
-                    # Add current line to window
-                    lines_buffer.append(line_content)
-                    line_numbers_buffer.append(line_num)
-
-                    # Keep only last window_size lines
-                    if len(lines_buffer) > window_size:
-                        lines_buffer.pop(0)
-                        line_numbers_buffer.pop(0)
-
-                    # Only search when we have a full window
-                    if len(lines_buffer) == window_size:
-                        match_found, should_stop = process_window(
-                            lines_buffer,
-                            line_numbers_buffer,
-                            file_path,
-                            search_phrases,
-                            case_sensitive=case_sensitive,
-                            match_all=match_all,
-                            print_results=print_results,
-                            show_line_numbers=show_line_numbers,
-                            files_only=files_only,
-                            count_only=count_only,
-                            output_file=output_file,
-                            verbose=verbose,
-                        )
-                        if match_found:
-                            matches += 1
-                        if should_stop:
-                            return matches
-
-                # Handle partial window at end of file (file shorter than window_size)
-                if lines_buffer and len(lines_buffer) < window_size:
-                    match_found, should_stop = process_window(
-                        lines_buffer,
-                        line_numbers_buffer,
-                        file_path,
-                        search_phrases,
-                        case_sensitive=case_sensitive,
-                        match_all=match_all,
-                        print_results=print_results,
-                        show_line_numbers=show_line_numbers,
-                        files_only=files_only,
-                        count_only=count_only,
-                        output_file=output_file,
-                        verbose=verbose,
-                    )
-                    if match_found:
-                        matches += 1
-                    if should_stop:
-                        return matches
-
-    except FileNotFoundError:
-        logger.error(f"Error: File {file_path} not found.")
+    except PermissionError:
+        logger.error(f"Error: Permission denied accessing {file_path}")
+        return 0
     except Exception as e:
         logger.error(f"ERROR: Unexpected error reading file {file_path}: {e}")
+        return 0
 
-    if verbose:
-        logger.info(f"  Search completed, found {matches} matches")
+    runtime_config.logger.info(f"  Search completed, found {matches} matches")
 
     return matches
 
 
+def _process_all_files(
+    files_to_search: List[str],
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+    args: argparse.Namespace,
+    vlogger: VerboseLogger,
+) -> int:
+    """Process all files and return total match count.
+
+    Args:
+        files_to_search: List of file paths to search
+        search_config: Search configuration
+        output_config: Output configuration
+        runtime_config: Runtime configuration
+        args: Command line arguments
+        vlogger: Verbose logger instance
+
+    Returns:
+        Total number of matches found across all files
+    """
+    total_matches = 0
+
+    for file_path in files_to_search:
+        matches = search_phrases_in_file(
+            file_path=file_path,
+            search_config=search_config,
+            output_config=output_config,
+            runtime_config=runtime_config,
+        )
+        total_matches += matches
+
+        # If count mode, print per-file counts
+        if args.count and not args.files_only:
+            if args.verbose:
+                print(f"{file_path}: {matches} matches")
+            else:
+                print(f"{file_path}: {matches}")
+            if output_config.output_file:
+                try:
+                    output_config.output_file.write(f"{file_path}: {matches}\n")
+                except Exception:
+                    vlogger.error(
+                        f"  ERROR: Failed to write count for {file_path} to output file"
+                    )
+
+    return total_matches
+
+
+def _print_summary(
+    total_matches: int, file_count: int, args: argparse.Namespace
+) -> None:
+    """Print search summary based on results and verbosity.
+
+    Args:
+        total_matches: Total number of matches found
+        file_count: Number of files searched
+        args: Command line arguments for verbose mode
+    """
+    if total_matches:
+        if args.verbose:
+            print("-" * 60)
+            print(f"SUMMARY: Found {total_matches} lines in {file_count} files")
+        else:
+            print(f"Found {total_matches} lines")
+        print("-" * 50)
+    else:
+        if args.verbose:
+            print("-" * 60)
+            print("SUMMARY: No matching lines found.")
+        else:
+            print("No matching lines found.")
+
+
+def _should_include_file(
+    file_path: Path, include_patterns: Optional[List[str]]
+) -> bool:
+    """Check if file matches any of the include patterns.
+
+    Args:
+        file_path: Path object to check
+        include_patterns: List of glob patterns or None
+
+    Returns:
+        True if file should be included, False otherwise
+    """
+    if not include_patterns:
+        return True
+    return any(file_path.match(pattern) for pattern in include_patterns)
+
+
 def get_files_to_search(
-    path: str, recursive: bool = False, verbose: bool = False
+    path: str,
+    recursive: bool = False,
+    vlogger: Optional[VerboseLogger] = None,
+    include_patterns: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Gets the list of files to search.
@@ -258,37 +525,61 @@ def get_files_to_search(
     Args:
         path: Path to file or directory
         recursive: Whether to search recursively in subdirectories
-        verbose: Whether to display detailed logs
+        vlogger: VerboseLogger instance for detailed logs
+        include_patterns: List of glob patterns (e.g., ['*.log', '*.txt']) to filter files.
+                         If None, all files are included.
 
     Returns:
         List of file paths
     """
-    if verbose:
-        logger.info(f"Checking path: {path}")
+    if vlogger is None:
+        vlogger = VerboseLogger()
+
+    vlogger.info(f"Checking path: {path}")
+    if include_patterns:
+        vlogger.info(f"  Filtering by patterns: {include_patterns}")
 
     path_obj = Path(path)
     files_to_search = []
 
     if path_obj.is_file():
-        if verbose:
-            logger.info(f"  This is a file: {path}")
-        return [str(path_obj)]
+        vlogger.info(f"  This is a file: {path}")
+
+        # Check if include patterns are specified with a single file
+        if include_patterns:
+            # Check if file matches any of the patterns
+            if _should_include_file(path_obj, include_patterns):
+                vlogger.info("  File matches include patterns")
+                return [str(path_obj)]
+            else:
+                # File doesn't match patterns - warn user and skip it
+                logger.warning(
+                    f"Warning: File '{path}' does not match include patterns {include_patterns}. "
+                    "File will be skipped."
+                )
+                return []
+        else:
+            # No patterns specified, include the file
+            return [str(path_obj)]
 
     elif path_obj.is_dir():
-        if verbose:
-            logger.info(f"  This is a directory: {path}")
-            if recursive:
-                logger.info("  Using recursive mode")
+        vlogger.info(f"  This is a directory: {path}")
+        if recursive:
+            vlogger.info("  Using recursive mode")
 
         if recursive:
             # Recursively search all files
             for file_path in path_obj.rglob("*"):
-                if file_path.is_file():
+                if file_path.is_file() and _should_include_file(
+                    file_path, include_patterns
+                ):
                     files_to_search.append(str(file_path))
         else:
             # Search only files in the main directory
             for file_path in path_obj.iterdir():
-                if file_path.is_file():
+                if file_path.is_file() and _should_include_file(
+                    file_path, include_patterns
+                ):
                     files_to_search.append(str(file_path))
     else:
         logger.error(
@@ -296,8 +587,7 @@ def get_files_to_search(
         )
         return []
 
-    if verbose:
-        logger.info(f"  Found {len(files_to_search)} files")
+    vlogger.info(f"  Found {len(files_to_search)} files")
 
     return sorted(files_to_search)
 
@@ -309,6 +599,10 @@ def search_phrases_in_text(
     Searches for lines containing specified phrases in text.
     """
     matching_lines = []
+
+    if not phrases:
+        return matching_lines
+
     lines = text.split("\n")
 
     for line_num, line in enumerate(lines, 1):
@@ -335,6 +629,55 @@ def search_phrases_in_text(
     return matching_lines
 
 
+def _configure_logging(verbose: bool) -> None:
+    """Configure logging based on verbosity level.
+
+    Args:
+        verbose: Whether to enable verbose (INFO level) logging
+    """
+    if verbose:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s: %(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+            force=True,
+        )
+    else:
+        # For non-verbose: only show warnings/errors
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+            force=True,
+        )
+
+
+def _print_search_info(args: argparse.Namespace, file_count: int) -> None:
+    """Print search configuration information.
+
+    Args:
+        args: Command line arguments
+        file_count: Number of files to be searched
+    """
+    if args.verbose:
+        if args.recursive:
+            print("Mode: recursive")
+        print(f"Search phrases: {args.phrases}")
+        print(f"Match mode: {'all phrases' if not args.any else 'any phrase'}")
+        print(
+            f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
+        )
+        print(
+            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}, window={args.window}"
+        )
+        print("-" * 60)
+    else:
+        print(f"Searching {file_count} files...")
+        if args.recursive:
+            print("(with recursive option)")
+        print("-" * 50)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Searches log files for lines containing specified phrases."
@@ -353,6 +696,13 @@ def main():
         "--recursive",
         action="store_true",
         help="Search recursively in all subdirectories (only when path is a directory)",
+    )
+    parser.add_argument(
+        "-e",
+        "--include",
+        action="append",
+        dest="include_patterns",
+        help="Include only files matching glob pattern (e.g., '*.log', '*.txt'). Can be used multiple times.",
     )
     parser.add_argument(
         "-v",
@@ -388,118 +738,81 @@ def main():
 
     args = parser.parse_args()
 
+    # Configure logging BEFORE creating logger
+    _configure_logging(args.verbose)
+
+    # Create verbose logger AFTER configuring logging
+    vlogger = VerboseLogger(verbose=args.verbose)
+    vlogger.info("Starting search...")
+
     # Get list of files to search
-    files_to_search = get_files_to_search(args.path, args.recursive, args.verbose)
+    files_to_search = get_files_to_search(
+        args.path, args.recursive, vlogger, args.include_patterns
+    )
 
     if not files_to_search:
-        logger.info("No files found to search.")
+        if args.include_patterns:
+            patterns_str = ", ".join(args.include_patterns)
+            print(f"No files found matching patterns: {patterns_str}")
+        else:
+            print("No files found to search.")
         return
 
-    if args.verbose:
-        if args.verbose:
-            logging.basicConfig(
-                level=logging.INFO,
-                format="%(levelname)s: %(message)s",
-                handlers=[logging.StreamHandler(sys.stdout)],
-            )
-        else:
-            # For non-verbose: only show warnings/errors, and matching lines as plain text
-            logging.basicConfig(
-                level=logging.WARNING,
-                format="%(message)s",  # no level prefix for matching lines
-                handlers=[logging.StreamHandler(sys.stdout)],
-            )
-        logger.info(f"Starting search of {len(files_to_search)} files...")
-        if args.recursive:
-            print("Mode: recursive")
-        print(f"Search phrases: {args.phrases}")
-        print(f"Match mode: {'all phrases' if not args.any else 'any phrase'}")
-        print(
-            f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
-        )
-        print(
-            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}, window={args.window}"
-        )
-        print("-" * 60)
-    else:
-        print(f"Searching {len(files_to_search)} files...")
-        if args.recursive:
-            print("(with recursive option)")
-        print("-" * 50)
+    # Print search configuration
+    _print_search_info(args, len(files_to_search))
 
-    total_matches = 0
+    # Open output file early with proper error handling
     output_handle: Optional[TextIO] = None
+    if args.output:
+        output_handle = _open_output_file(args.output, vlogger)
+        if output_handle is None:
+            # Error already logged by _open_output_file
+            return
 
-    try:
-        if args.output:
-            if args.verbose:
-                logger.info(f"Opening output file: {args.output}")
-            output_handle = open(args.output, "w", encoding="utf-8")
+    # Create config objects from args
+    search_config = SearchConfig(
+        phrases=args.phrases,
+        case_sensitive=not args.ignore_case,
+        match_all=not args.any,
+        window_size=args.window,
+    )
 
-        # Search each file (streaming; results printed/written immediately)
-        for file_path in files_to_search:
-            matches = search_phrases_in_file(
-                file_path=file_path,
-                phrases=args.phrases,
-                case_sensitive=not args.ignore_case,
-                match_all=not args.any,
-                verbose=args.verbose,
-                output_file=output_handle,
-                print_results=not args.count and not args.files_only,
-                show_line_numbers=not args.no_line_numbers,
-                files_only=args.files_only,
-                count_only=args.count,
-                window_size=args.window,
-            )
-            total_matches += matches
+    output_config = OutputConfig(
+        output_file=output_handle,
+        show_line_numbers=not args.no_line_numbers,
+        print_results=not args.count and not args.files_only,
+        count_only=args.count,
+        files_only=args.files_only,
+    )
 
-            # If count mode, print per-file counts
-            if args.count and not args.files_only:
-                # print and optionally write per-file count
-                if args.verbose:
-                    print(f"{file_path}: {matches} matches")
-                else:
-                    print(f"{file_path}: {matches}")
-                if output_handle:
-                    try:
-                        output_handle.write(f"{file_path}: {matches}\n")
-                    except Exception:
-                        if args.verbose:
-                            print(
-                                f"  ERROR: Failed to write count for {file_path} to output file"
-                            )
+    runtime_config = RuntimeConfig(
+        logger=vlogger,
+        recursive=args.recursive,
+        include_patterns=args.include_patterns,
+    )
 
-        # Summary
-        if total_matches:
-            if args.verbose:
-                print("-" * 60)
-                print(
-                    f"SUMMARY: Found {total_matches} lines in {len(files_to_search)} files:"
-                )
-            else:
-                print(f"Found {total_matches} lines:")
-            print("-" * 50)
-        else:
-            if args.verbose:
-                print("-" * 60)
-                print("SUMMARY: No matching lines found.")
-            else:
-                print("No matching lines found.")
+    # Process all files
+    total_matches = _process_all_files(
+        files_to_search,
+        search_config,
+        output_config,
+        runtime_config,
+        args,
+        vlogger,
+    )
 
-        if args.output:
-            print(f"\nResults saved to: {args.output}")
-            if args.verbose:
-                print(f"Saved {total_matches} lines to file")
+    # Print summary
+    _print_summary(total_matches, len(files_to_search), args)
 
-    except Exception as e:
-        logger.error(f"ERROR during search: {e}")
-
-    finally:
-        if output_handle:
-            try:
-                output_handle.close()
-            except Exception as close_error:
-                logger.warning(f"Failed to close output file: {close_error}")
+    # Close output file
+    if output_handle:
+        try:
+            output_handle.close()
+            if args.output:
+                print(f"\nResults saved to: {args.output}")
+                vlogger.info(f"Saved {total_matches} lines to file")
+        except Exception as close_error:
+            logger.warning(f"Failed to close output file: {close_error}")
 
 
 # Usage examples

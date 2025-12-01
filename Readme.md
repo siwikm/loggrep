@@ -39,6 +39,7 @@ Output: each matched line is printed in the format `path:line: content`.
 - `-i`, `--ignore-case` — ignore letter case
 - `-a`, `--any` — show lines containing ANY phrase (default: ALL phrases)
 - `-r`, `--recursive` — search directories recursively (only when the provided path is a directory)
+- `-e`, `--include <pattern>` — include only files matching glob pattern (e.g., `*.log`, `*.txt`). Can be used multiple times
 - `-v`, `--verbose` — display detailed operation logs
 - `-o`, `--output <file>` — save results to a file
 - `-w`, `--window <N>` — search phrases within a window of N adjacent lines (default: 1 line)
@@ -51,7 +52,7 @@ Output: each matched line is printed in the format `path:line: content`.
 1. Search for lines that contain both `ERROR` and `database` in a file:
 
 ```sh
-loggrep tests/t2.log ERROR database
+loggrep tests/test_files/t2.log ERROR database
 ```
 
 2. Search for lines that contain `ERROR` OR `WARNING` (any mode):
@@ -93,9 +94,21 @@ loggrep app.log 'ERROR' 'database' --window 3
 8. Show only filenames or match counts:
 
 ```sh
-loggrep tests 'cardType' --files-only
-loggrep tests/t2.log 'INFO' --count
+loggrep tests/test_files 'cardType' --files-only
+loggrep tests/test_files/t2.log 'INFO' --count
 ```
+
+9. Filter by file extension (recursive search):
+
+```sh
+# Search only .log files (note: glob patterns must be quoted)
+loggrep /var/logs 'ERROR' -r -e '*.log'
+
+# Search both .log and .txt files
+loggrep /var/logs 'ERROR' -r -e '*.log' -e '*.txt'
+```
+
+**Note:** Always quote glob patterns (e.g., `'*.log'`) to prevent shell expansion.
 
 ---
 

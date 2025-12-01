@@ -10,7 +10,7 @@ TESTS_DIR = Path(__file__).parent
 LOGGREP_PATH = TESTS_DIR.parent
 sys.path.insert(0, str(LOGGREP_PATH))
 
-from loggrep import SearchConfig, OutputConfig, RuntimeConfig
+from loggrep import SearchConfig, OutputConfig, RuntimeConfig, VerboseLogger
 
 
 class TestSearchConfig:
@@ -113,36 +113,42 @@ class TestRuntimeConfig:
 
     def test_default_values(self):
         """Test RuntimeConfig with default values."""
-        config = RuntimeConfig()
+        vlogger = VerboseLogger()
+        config = RuntimeConfig(logger=vlogger)
 
-        assert config.verbose is False
+        assert isinstance(config.logger, VerboseLogger)
+        assert config.logger.verbose is False
         assert config.recursive is False
         assert config.include_patterns is None
 
     def test_custom_values(self):
         """Test RuntimeConfig with custom values."""
+        vlogger = VerboseLogger(verbose=True)
         config = RuntimeConfig(
-            verbose=True, recursive=True, include_patterns=["*.log", "*.txt"]
+            logger=vlogger, recursive=True, include_patterns=["*.log", "*.txt"]
         )
 
-        assert config.verbose is True
+        assert config.logger.verbose is True
         assert config.recursive is True
         assert config.include_patterns == ["*.log", "*.txt"]
 
     def test_single_include_pattern(self):
         """Test RuntimeConfig with single include pattern."""
-        config = RuntimeConfig(include_patterns=["*.xml"])
+        vlogger = VerboseLogger()
+        config = RuntimeConfig(logger=vlogger, include_patterns=["*.xml"])
         assert config.include_patterns == ["*.xml"]
         assert len(config.include_patterns) == 1
 
     def test_empty_include_patterns(self):
         """Test RuntimeConfig with empty include patterns list."""
-        config = RuntimeConfig(include_patterns=[])
+        vlogger = VerboseLogger()
+        config = RuntimeConfig(logger=vlogger, include_patterns=[])
         assert config.include_patterns == []
 
     def test_recursive_without_patterns(self):
         """Test RuntimeConfig with recursive but no patterns."""
-        config = RuntimeConfig(recursive=True, include_patterns=None)
+        vlogger = VerboseLogger()
+        config = RuntimeConfig(logger=vlogger, recursive=True, include_patterns=None)
         assert config.recursive is True
         assert config.include_patterns is None
 
@@ -159,31 +165,39 @@ class TestConfigIntegration:
             window_size=1,
         )
         output_config = OutputConfig(show_line_numbers=True, print_results=True)
+        vlogger = VerboseLogger(verbose=True)
         runtime_config = RuntimeConfig(
-            verbose=True, recursive=True, include_patterns=["*.log"]
+            logger=vlogger, recursive=True, include_patterns=["*.log"]
         )
 
         assert search_config.phrases == ["error", "warning"]
         assert output_config.show_line_numbers is True
         assert runtime_config.recursive is True
+        assert runtime_config.logger.verbose is True
 
     def test_window_search_scenario(self):
         """Test creating configs for window search."""
         search_config = SearchConfig(
-            phrases=["database", "connection", "failed"], match_all=True, window_size=3
+            phrases=["database", "connection", "failed"],
+            match_all=True,
+            window_size=3,
         )
         output_config = OutputConfig(show_line_numbers=True)
-        runtime_config = RuntimeConfig(verbose=False)
+        vlogger = VerboseLogger(verbose=False)
+        runtime_config = RuntimeConfig(logger=vlogger)
 
         assert search_config.window_size == 3
         assert search_config.match_all is True
         assert len(search_config.phrases) == 3
+        assert runtime_config.logger.verbose is False
 
     def test_count_only_scenario(self):
         """Test creating configs for count-only mode."""
         search_config = SearchConfig(phrases=["ERROR"])
         output_config = OutputConfig(count_only=True, print_results=False)
-        runtime_config = RuntimeConfig()
+        vlogger = VerboseLogger()
+        runtime_config = RuntimeConfig(logger=vlogger)
 
         assert output_config.count_only is True
         assert output_config.print_results is False
+        assert isinstance(runtime_config.logger, VerboseLogger)

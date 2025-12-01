@@ -9,7 +9,30 @@ from dataclasses import dataclass
 import logging
 
 
-logger = logging.getLogger(__name__)
+# Verbose Logger Class
+class VerboseLogger:
+    """Logger that handles verbosity checks internally."""
+
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+        self._logger = logging.getLogger(__name__)
+
+    def info(self, msg: str):
+        """Only logs if verbose mode is enabled."""
+        if self.verbose:
+            self._logger.info(msg)
+
+    def error(self, msg: str):
+        """Always logs errors."""
+        self._logger.error(msg)
+
+    def warning(self, msg: str):
+        """Always logs warnings."""
+        self._logger.warning(msg)
+
+
+# Default logger instance (will be replaced in main with verbose setting)
+logger = VerboseLogger()
 
 
 # Configuration Objects
@@ -38,7 +61,7 @@ class OutputConfig:
 class RuntimeConfig:
     """Runtime configuration."""
 
-    verbose: bool = False
+    logger: VerboseLogger
     recursive: bool = False
     include_patterns: Optional[List[str]] = None
 
@@ -91,7 +114,7 @@ def process_window(
     if output_config.print_results:
         print(out)
     _write_to_output_file(
-        output_config.output_file, out, file_path, runtime_config.verbose
+        output_config.output_file, out, file_path, runtime_config.logger
     )
 
     return True, False
@@ -141,17 +164,19 @@ def _format_match_output(
 
 
 def _write_to_output_file(
-    output_file: Optional[TextIO], content: str, file_path: str, verbose: bool = False
+    output_file: Optional[TextIO],
+    content: str,
+    file_path: str,
+    vlogger: VerboseLogger,
 ) -> None:
     """Write content to output file with error handling."""
     if output_file:
         try:
             output_file.write(content + "\n")
         except Exception:
-            if verbose:
-                logger.error(
-                    f"  ERROR: Failed to write to output file while processing {file_path}"
-                )
+            vlogger.error(
+                f"  ERROR: Failed to write to output file while processing {file_path}"
+            )
 
 
 def _handle_files_only_match(
@@ -163,7 +188,7 @@ def _handle_files_only_match(
     if output_config.print_results:
         print(file_path)
     _write_to_output_file(
-        output_config.output_file, file_path, file_path, runtime_config.verbose
+        output_config.output_file, file_path, file_path, runtime_config.logger
     )
 
 
@@ -181,7 +206,7 @@ def _handle_normal_match(
     if output_config.print_results:
         print(output)
     _write_to_output_file(
-        output_config.output_file, output, file_path, runtime_config.verbose
+        output_config.output_file, output, file_path, runtime_config.logger
     )
 
 
@@ -306,10 +331,9 @@ def search_phrases_in_file(
 
     Returns: number of matching lines found
     """
-    if runtime_config.verbose:
-        logger.info(
-            f"Searching file: {file_path} (window size: {search_config.window_size})"
-        )
+    runtime_config.logger.info(
+        f"Searching file: {file_path} (window size: {search_config.window_size})"
+    )
 
     # Early validation - fail fast
     if not _validate_file_exists(file_path):
@@ -323,8 +347,7 @@ def search_phrases_in_file(
     try:
         # errors='replace' prevents crashes on bad encoding while keeping streaming
         with open(file_path, "r", encoding="utf-8", errors="replace") as file:
-            if runtime_config.verbose:
-                logger.info("  File loading completed successfully")
+            runtime_config.logger.info("  File loading completed successfully")
 
             # Delegate to appropriate search method
             if search_config.window_size == 1:
@@ -353,8 +376,7 @@ def search_phrases_in_file(
         logger.error(f"ERROR: Unexpected error reading file {file_path}: {e}")
         return 0
 
-    if runtime_config.verbose:
-        logger.info(f"  Search completed, found {matches} matches")
+    runtime_config.logger.info(f"  Search completed, found {matches} matches")
 
     return matches
 
@@ -362,7 +384,7 @@ def search_phrases_in_file(
 def get_files_to_search(
     path: str,
     recursive: bool = False,
-    verbose: bool = False,
+    vlogger: Optional[VerboseLogger] = None,
     include_patterns: Optional[List[str]] = None,
 ) -> List[str]:
     """
@@ -371,31 +393,31 @@ def get_files_to_search(
     Args:
         path: Path to file or directory
         recursive: Whether to search recursively in subdirectories
-        verbose: Whether to display detailed logs
+        vlogger: VerboseLogger instance for detailed logs
         include_patterns: List of glob patterns (e.g., ['*.log', '*.txt']) to filter files.
                          If None, all files are included.
 
     Returns:
         List of file paths
     """
-    if verbose:
-        logger.info(f"Checking path: {path}")
-        if include_patterns:
-            logger.info(f"  Filtering by patterns: {include_patterns}")
+    if vlogger is None:
+        vlogger = VerboseLogger()
+
+    vlogger.info(f"Checking path: {path}")
+    if include_patterns:
+        vlogger.info(f"  Filtering by patterns: {include_patterns}")
 
     path_obj = Path(path)
     files_to_search = []
 
     if path_obj.is_file():
-        if verbose:
-            logger.info(f"  This is a file: {path}")
+        vlogger.info(f"  This is a file: {path}")
         return [str(path_obj)]
 
     elif path_obj.is_dir():
-        if verbose:
-            logger.info(f"  This is a directory: {path}")
-            if recursive:
-                logger.info("  Using recursive mode")
+        vlogger.info(f"  This is a directory: {path}")
+        if recursive:
+            vlogger.info("  Using recursive mode")
 
         if recursive:
             # Recursively search all files
@@ -427,8 +449,7 @@ def get_files_to_search(
         )
         return []
 
-    if verbose:
-        logger.info(f"  Found {len(files_to_search)} files")
+    vlogger.info(f"  Found {len(files_to_search)} files")
 
     return sorted(files_to_search)
 
@@ -526,9 +547,12 @@ def main():
 
     args = parser.parse_args()
 
+    # Create verbose logger
+    vlogger = VerboseLogger(verbose=args.verbose)
+
     # Get list of files to search
     files_to_search = get_files_to_search(
-        args.path, args.recursive, args.verbose, args.include_patterns
+        args.path, args.recursive, vlogger, args.include_patterns
     )
 
     if not files_to_search:
@@ -540,20 +564,21 @@ def main():
         return
 
     if args.verbose:
-        if args.verbose:
-            logging.basicConfig(
-                level=logging.INFO,
-                format="%(levelname)s: %(message)s",
-                handlers=[logging.StreamHandler(sys.stdout)],
-            )
-        else:
-            # For non-verbose: only show warnings/errors, and matching lines as plain text
-            logging.basicConfig(
-                level=logging.WARNING,
-                format="%(message)s",  # no level prefix for matching lines
-                handlers=[logging.StreamHandler(sys.stdout)],
-            )
-        logger.info(f"Starting search of {len(files_to_search)} files...")
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s: %(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+        )
+        vlogger.info(f"Starting search of {len(files_to_search)} files...")
+    else:
+        # For non-verbose: only show warnings/errors
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+        )
+
+    if args.verbose:
         if args.recursive:
             print("Mode: recursive")
         print(f"Search phrases: {args.phrases}")
@@ -576,8 +601,7 @@ def main():
 
     try:
         if args.output:
-            if args.verbose:
-                logger.info(f"Opening output file: {args.output}")
+            vlogger.info(f"Opening output file: {args.output}")
             output_handle = open(args.output, "w", encoding="utf-8")
 
         # Create config objects from args
@@ -597,7 +621,7 @@ def main():
         )
 
         runtime_config = RuntimeConfig(
-            verbose=args.verbose,
+            logger=vlogger,
             recursive=args.recursive,
             include_patterns=args.include_patterns,
         )
@@ -623,10 +647,9 @@ def main():
                     try:
                         output_handle.write(f"{file_path}: {matches}\n")
                     except Exception:
-                        if args.verbose:
-                            print(
-                                f"  ERROR: Failed to write count for {file_path} to output file"
-                            )
+                        vlogger.error(
+                            f"  ERROR: Failed to write count for {file_path} to output file"
+                        )
 
         # Summary
         if total_matches:
@@ -647,8 +670,7 @@ def main():
 
         if args.output:
             print(f"\nResults saved to: {args.output}")
-            if args.verbose:
-                print(f"Saved {total_matches} lines to file")
+            vlogger.info(f"Saved {total_matches} lines to file")
 
     except Exception as e:
         logger.error(f"ERROR during search: {e}")

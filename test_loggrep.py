@@ -276,6 +276,74 @@ def test_verbose_mode():
     print()
 
 
+def test_window_exact_size():
+    """Test --window with a file whose length equals the window size."""
+    print("Test 12: Window search across exactly N lines")
+
+    content = """[2025-01-06 10:00:01] INFO: Job started
+[2025-01-06 10:00:02] ERROR: Connection lost
+[2025-01-06 10:00:03] INFO: database reconnect scheduled
+"""
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        returncode, stdout, stderr = run_loggrep(
+            [tmp_path, "ERROR", "database", "--window", "3"]
+        )
+
+        if returncode == 0 and "database reconnect scheduled" in stdout:
+            print("  ✓ Window search found phrases spread across 3 adjacent lines")
+            snippet = stdout.strip().split("\n")[0]
+            print(f"  Example: {snippet[:120]}...")
+        else:
+            print(f"  ✗ Window search failed (code {returncode})")
+            if stderr:
+                print(f"  stderr: {stderr}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+    print()
+
+
+def test_window_partial_tail():
+    """Test --window on a file shorter than the requested window (partial window)."""
+    print("Test 13: Window search handles partial tail")
+
+    content = """[2025-01-06 11:00:01] INFO: Starting cleanup
+[2025-01-06 11:00:02] ERROR: Cleanup failed
+[2025-01-06 11:00:03] INFO: timeout waiting for resource
+"""
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        returncode, stdout, stderr = run_loggrep(
+            [tmp_path, "ERROR", "timeout", "--window", "5"]
+        )
+
+        if returncode == 0 and "timeout waiting for resource" in stdout:
+            print(
+                "  ✓ Partial window (file shorter than window size) still reported a match"
+            )
+            snippet = stdout.strip().split("\n")[0]
+            print(f"  Example: {snippet[:120]}...")
+        else:
+            print(f"  ✗ Partial window search failed (code {returncode})")
+            if stderr:
+                print(f"  stderr: {stderr}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+    print()
+
+
 def main():
     """Run all tests."""
     print("Running loggrep tests...")
@@ -307,6 +375,8 @@ def main():
     test_output_to_file()
     test_no_line_numbers()
     test_verbose_mode()
+    test_window_exact_size()
+    test_window_partial_tail()
 
     print("=" * 60)
     print("All tests completed!")

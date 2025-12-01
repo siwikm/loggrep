@@ -66,6 +66,36 @@ class RuntimeConfig:
     include_patterns: Optional[List[str]] = None
 
 
+def _format_window_output(
+    file_path: str,
+    buffer_lines: List[str],
+    buffer_numbers: List[int],
+    show_line_numbers: bool,
+) -> str:
+    """Format window match output.
+
+    Args:
+        file_path: Path to the file being searched
+        buffer_lines: Lines in the matching window
+        buffer_numbers: Line numbers for each line in window
+        show_line_numbers: Whether to include line numbers in output
+
+    Returns:
+        Formatted output string
+    """
+    start_line = buffer_numbers[0]
+    end_line = buffer_numbers[-1]
+
+    if show_line_numbers:
+        out = f"{file_path}:{start_line}-{end_line}:\n"
+        for i, (ln, content) in enumerate(zip(buffer_numbers, buffer_lines)):
+            prefix = "  " if i > 0 else ""
+            out += f"{prefix}{ln}: {content}\n"
+        return out.rstrip("\n")
+    else:
+        return f"{file_path}:\n" + "\n".join(f"  {line}" for line in buffer_lines)
+
+
 def process_window(
     buffer_lines: List[str],
     buffer_numbers: List[int],
@@ -100,16 +130,10 @@ def process_window(
     if output_config.count_only:
         return True, False
 
-    start_line = buffer_numbers[0]
-    end_line = buffer_numbers[-1]
-    if output_config.show_line_numbers:
-        out = f"{file_path}:{start_line}-{end_line}:\n"
-        for i, (ln, content) in enumerate(zip(buffer_numbers, buffer_lines)):
-            prefix = "  " if i > 0 else ""
-            out += f"{prefix}{ln}: {content}\n"
-        out = out.rstrip("\n")
-    else:
-        out = f"{file_path}:\n" + "\n".join(f"  {line}" for line in buffer_lines)
+    # Format and output the window match
+    out = _format_window_output(
+        file_path, buffer_lines, buffer_numbers, output_config.show_line_numbers
+    )
 
     if output_config.print_results:
         print(out)
@@ -161,6 +185,23 @@ def _format_match_output(
         return f"{file_path}:{line_num}: {line_content}"
     else:
         return f"{file_path}: {line_content}"
+
+
+def _open_output_file(output_path: str, vlogger: VerboseLogger) -> Optional[TextIO]:
+    """Open output file with early error handling.
+
+    Returns:
+        File handle or None if opening failed
+    """
+    try:
+        vlogger.info(f"Opening output file: {output_path}")
+        return open(output_path, "w", encoding="utf-8")
+    except PermissionError:
+        logger.error(f"Error: Permission denied writing to {output_path}")
+        return None
+    except OSError as e:
+        logger.error(f"Error: Cannot create output file {output_path}: {e}")
+        return None
 
 
 def _write_to_output_file(
@@ -381,6 +422,80 @@ def search_phrases_in_file(
     return matches
 
 
+def _process_all_files(
+    files_to_search: List[str],
+    search_config: SearchConfig,
+    output_config: OutputConfig,
+    runtime_config: RuntimeConfig,
+    args: argparse.Namespace,
+    vlogger: VerboseLogger,
+) -> int:
+    """Process all files and return total match count.
+
+    Args:
+        files_to_search: List of file paths to search
+        search_config: Search configuration
+        output_config: Output configuration
+        runtime_config: Runtime configuration
+        args: Command line arguments
+        vlogger: Verbose logger instance
+
+    Returns:
+        Total number of matches found across all files
+    """
+    total_matches = 0
+
+    for file_path in files_to_search:
+        matches = search_phrases_in_file(
+            file_path=file_path,
+            search_config=search_config,
+            output_config=output_config,
+            runtime_config=runtime_config,
+        )
+        total_matches += matches
+
+        # If count mode, print per-file counts
+        if args.count and not args.files_only:
+            if args.verbose:
+                print(f"{file_path}: {matches} matches")
+            else:
+                print(f"{file_path}: {matches}")
+            if output_config.output_file:
+                try:
+                    output_config.output_file.write(f"{file_path}: {matches}\n")
+                except Exception:
+                    vlogger.error(
+                        f"  ERROR: Failed to write count for {file_path} to output file"
+                    )
+
+    return total_matches
+
+
+def _print_summary(
+    total_matches: int, file_count: int, args: argparse.Namespace
+) -> None:
+    """Print search summary based on results and verbosity.
+
+    Args:
+        total_matches: Total number of matches found
+        file_count: Number of files searched
+        args: Command line arguments for verbose mode
+    """
+    if total_matches:
+        if args.verbose:
+            print("-" * 60)
+            print(f"SUMMARY: Found {total_matches} lines in {file_count} files")
+        else:
+            print(f"Found {total_matches} lines")
+        print("-" * 50)
+    else:
+        if args.verbose:
+            print("-" * 60)
+            print("SUMMARY: No matching lines found.")
+        else:
+            print("No matching lines found.")
+
+
 def get_files_to_search(
     path: str,
     recursive: bool = False,
@@ -461,6 +576,10 @@ def search_phrases_in_text(
     Searches for lines containing specified phrases in text.
     """
     matching_lines = []
+
+    if not phrases:
+        return matching_lines
+
     lines = text.split("\n")
 
     for line_num, line in enumerate(lines, 1):
@@ -485,6 +604,55 @@ def search_phrases_in_text(
                 matching_lines.append(f"{line_num}: {line_content}")
 
     return matching_lines
+
+
+def _configure_logging(verbose: bool) -> None:
+    """Configure logging based on verbosity level.
+
+    Args:
+        verbose: Whether to enable verbose (INFO level) logging
+    """
+    if verbose:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s: %(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+            force=True,
+        )
+    else:
+        # For non-verbose: only show warnings/errors
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+            force=True,
+        )
+
+
+def _print_search_info(args: argparse.Namespace, file_count: int) -> None:
+    """Print search configuration information.
+
+    Args:
+        args: Command line arguments
+        file_count: Number of files to be searched
+    """
+    if args.verbose:
+        if args.recursive:
+            print("Mode: recursive")
+        print(f"Search phrases: {args.phrases}")
+        print(f"Match mode: {'all phrases' if not args.any else 'any phrase'}")
+        print(
+            f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
+        )
+        print(
+            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}, window={args.window}"
+        )
+        print("-" * 60)
+    else:
+        print(f"Searching {file_count} files...")
+        if args.recursive:
+            print("(with recursive option)")
+        print("-" * 50)
 
 
 def main():
@@ -547,8 +715,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Create verbose logger
+    # Configure logging BEFORE creating logger
+    _configure_logging(args.verbose)
+
+    # Create verbose logger AFTER configuring logging
     vlogger = VerboseLogger(verbose=args.verbose)
+    vlogger.info("Starting search...")
 
     # Get list of files to search
     files_to_search = get_files_to_search(
@@ -563,124 +735,61 @@ def main():
             print("No files found to search.")
         return
 
-    if args.verbose:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(levelname)s: %(message)s",
-            handlers=[logging.StreamHandler(sys.stdout)],
-        )
-        vlogger.info(f"Starting search of {len(files_to_search)} files...")
-    else:
-        # For non-verbose: only show warnings/errors
-        logging.basicConfig(
-            level=logging.WARNING,
-            format="%(message)s",
-            handlers=[logging.StreamHandler(sys.stdout)],
-        )
+    # Print search configuration
+    _print_search_info(args, len(files_to_search))
 
-    if args.verbose:
-        if args.recursive:
-            print("Mode: recursive")
-        print(f"Search phrases: {args.phrases}")
-        print(f"Match mode: {'all phrases' if not args.any else 'any phrase'}")
-        print(
-            f"Case sensitivity: {'considered' if not args.ignore_case else 'ignored'}"
-        )
-        print(
-            f"Print options: line_numbers={'no' if args.no_line_numbers else 'yes'}, count={args.count}, files_only={args.files_only}, window={args.window}"
-        )
-        print("-" * 60)
-    else:
-        print(f"Searching {len(files_to_search)} files...")
-        if args.recursive:
-            print("(with recursive option)")
-        print("-" * 50)
-
-    total_matches = 0
+    # Open output file early with proper error handling
     output_handle: Optional[TextIO] = None
+    if args.output:
+        output_handle = _open_output_file(args.output, vlogger)
+        if output_handle is None:
+            # Error already logged by _open_output_file
+            return
 
-    try:
-        if args.output:
-            vlogger.info(f"Opening output file: {args.output}")
-            output_handle = open(args.output, "w", encoding="utf-8")
+    # Create config objects from args
+    search_config = SearchConfig(
+        phrases=args.phrases,
+        case_sensitive=not args.ignore_case,
+        match_all=not args.any,
+        window_size=args.window,
+    )
 
-        # Create config objects from args
-        search_config = SearchConfig(
-            phrases=args.phrases,
-            case_sensitive=not args.ignore_case,
-            match_all=not args.any,
-            window_size=args.window,
-        )
+    output_config = OutputConfig(
+        output_file=output_handle,
+        show_line_numbers=not args.no_line_numbers,
+        print_results=not args.count and not args.files_only,
+        count_only=args.count,
+        files_only=args.files_only,
+    )
 
-        output_config = OutputConfig(
-            output_file=output_handle,
-            show_line_numbers=not args.no_line_numbers,
-            print_results=not args.count and not args.files_only,
-            count_only=args.count,
-            files_only=args.files_only,
-        )
+    runtime_config = RuntimeConfig(
+        logger=vlogger,
+        recursive=args.recursive,
+        include_patterns=args.include_patterns,
+    )
 
-        runtime_config = RuntimeConfig(
-            logger=vlogger,
-            recursive=args.recursive,
-            include_patterns=args.include_patterns,
-        )
+    # Process all files
+    total_matches = _process_all_files(
+        files_to_search,
+        search_config,
+        output_config,
+        runtime_config,
+        args,
+        vlogger,
+    )
 
-        # Search each file (streaming; results printed/written immediately)
-        for file_path in files_to_search:
-            matches = search_phrases_in_file(
-                file_path=file_path,
-                search_config=search_config,
-                output_config=output_config,
-                runtime_config=runtime_config,
-            )
-            total_matches += matches
+    # Print summary
+    _print_summary(total_matches, len(files_to_search), args)
 
-            # If count mode, print per-file counts
-            if args.count and not args.files_only:
-                # print and optionally write per-file count
-                if args.verbose:
-                    print(f"{file_path}: {matches} matches")
-                else:
-                    print(f"{file_path}: {matches}")
-                if output_handle:
-                    try:
-                        output_handle.write(f"{file_path}: {matches}\n")
-                    except Exception:
-                        vlogger.error(
-                            f"  ERROR: Failed to write count for {file_path} to output file"
-                        )
-
-        # Summary
-        if total_matches:
-            if args.verbose:
-                print("-" * 60)
-                print(
-                    f"SUMMARY: Found {total_matches} lines in {len(files_to_search)} files:"
-                )
-            else:
-                print(f"Found {total_matches} lines:")
-            print("-" * 50)
-        else:
-            if args.verbose:
-                print("-" * 60)
-                print("SUMMARY: No matching lines found.")
-            else:
-                print("No matching lines found.")
-
-        if args.output:
-            print(f"\nResults saved to: {args.output}")
-            vlogger.info(f"Saved {total_matches} lines to file")
-
-    except Exception as e:
-        logger.error(f"ERROR during search: {e}")
-
-    finally:
-        if output_handle:
-            try:
-                output_handle.close()
-            except Exception as close_error:
-                logger.warning(f"Failed to close output file: {close_error}")
+    # Close output file
+    if output_handle:
+        try:
+            output_handle.close()
+            if args.output:
+                print(f"\nResults saved to: {args.output}")
+                vlogger.info(f"Saved {total_matches} lines to file")
+        except Exception as close_error:
+            logger.warning(f"Failed to close output file: {close_error}")
 
 
 # Usage examples

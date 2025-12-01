@@ -496,6 +496,23 @@ def _print_summary(
             print("No matching lines found.")
 
 
+def _should_include_file(
+    file_path: Path, include_patterns: Optional[List[str]]
+) -> bool:
+    """Check if file matches any of the include patterns.
+
+    Args:
+        file_path: Path object to check
+        include_patterns: List of glob patterns or None
+
+    Returns:
+        True if file should be included, False otherwise
+    """
+    if not include_patterns:
+        return True
+    return any(file_path.match(pattern) for pattern in include_patterns)
+
+
 def get_files_to_search(
     path: str,
     recursive: bool = False,
@@ -527,7 +544,23 @@ def get_files_to_search(
 
     if path_obj.is_file():
         vlogger.info(f"  This is a file: {path}")
-        return [str(path_obj)]
+
+        # Check if include patterns are specified with a single file
+        if include_patterns:
+            # Check if file matches any of the patterns
+            if _should_include_file(path_obj, include_patterns):
+                vlogger.info("  File matches include patterns")
+                return [str(path_obj)]
+            else:
+                # File doesn't match patterns - warn user and skip it
+                logger.warning(
+                    f"Warning: File '{path}' does not match include patterns {include_patterns}. "
+                    "File will be skipped."
+                )
+                return []
+        else:
+            # No patterns specified, include the file
+            return [str(path_obj)]
 
     elif path_obj.is_dir():
         vlogger.info(f"  This is a directory: {path}")
@@ -537,27 +570,17 @@ def get_files_to_search(
         if recursive:
             # Recursively search all files
             for file_path in path_obj.rglob("*"):
-                if file_path.is_file():
-                    # Apply include patterns if specified
-                    if include_patterns:
-                        if any(
-                            file_path.match(pattern) for pattern in include_patterns
-                        ):
-                            files_to_search.append(str(file_path))
-                    else:
-                        files_to_search.append(str(file_path))
+                if file_path.is_file() and _should_include_file(
+                    file_path, include_patterns
+                ):
+                    files_to_search.append(str(file_path))
         else:
             # Search only files in the main directory
             for file_path in path_obj.iterdir():
-                if file_path.is_file():
-                    # Apply include patterns if specified
-                    if include_patterns:
-                        if any(
-                            file_path.match(pattern) for pattern in include_patterns
-                        ):
-                            files_to_search.append(str(file_path))
-                    else:
-                        files_to_search.append(str(file_path))
+                if file_path.is_file() and _should_include_file(
+                    file_path, include_patterns
+                ):
+                    files_to_search.append(str(file_path))
     else:
         logger.error(
             f"Error: Path {path} does not exist or is not a file or directory."
